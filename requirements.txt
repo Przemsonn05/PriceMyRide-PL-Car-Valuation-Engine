@@ -10,3 +10,5 @@ huggingface_hub
 category-encoders
 scikit-learn
 streamlit
+folium
+plotly
