@@ -380,10 +380,10 @@ def generate_otomoto_link(brand, model, year, price_min, price_max):
     model_clean = model.lower().replace(' ', '-') if model else ""
     params = {
         'search[filter_enum_make]': brand,
-        'search[filter_float_year:from]': max(year - 2, 2000),
+        'search[filter_float_year:from]': max(year - 2, 1980),
         'search[filter_float_year:to]': min(year + 2, 2026),
-        'search[filter_float_price:from]': int(price_min * 0.85),
-        'search[filter_float_price:to]': int(price_max * 1.15),
+        'search[filter_float_price:from]': int(price_min * 0.89),
+        'search[filter_float_price:to]': int(price_max * 1.10),
     }
     if model_clean:
         return f"{base_url}/{brand_clean}/{model_clean}?{urlencode(params)}"
@@ -482,7 +482,7 @@ with st.sidebar:
     st.markdown("""
     <div style='text-align: center; padding: 0 8px;'>
         <p style='font-size: 11px; color: #2d3748; line-height: 1.8; margin: 0;'>
-            XGBoost · scikit-learn<br>60,000+ listings · R² 92.6%
+            XGBoost · scikit-learn<br>200,000+ listings · R² 92.4%
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -569,13 +569,13 @@ def home_page():
     st.markdown("""
     <h2 style='text-align: center; margin-bottom: 24px;'>About the Project</h2>
 
-    <div style='max-width: 780px; margin: 0 auto; color: #a0aec0; font-size: 16px; line-height: 1.8;'>
+    <div style="max-width:900px;margin:auto;text-align:center;font-size:18px;line-height:1.6;">
 
     <p>
     <b style='color: #f7fafc;'>Car Price Prediction</b> is a machine learning project designed to estimate 
     used car prices on the Polish automotive market. The model analyzes historical listing data and 
     predicts vehicle values with an accuracy of approximately 
-    <b style='color: #63b3ed;'>R² = 92.5%</b>.
+    <b style='color: #63b3ed;'>R² = 92.4%</b>.
     </p>
 
     <p>
@@ -791,7 +791,7 @@ def regional_page():
     st.markdown("""
     <h1 style='margin-bottom: 8px;'>🗺️ Regional Market</h1>
     <p style='color: #718096; margin-bottom: 24px; font-size: 16px;'>
-        Distribution of car listings across Poland based on 60,000+ entries.
+        Distribution of car listings across Poland based on 200,000+ entries.
     </p>
     """, unsafe_allow_html=True)
 
@@ -915,46 +915,70 @@ def visualizations_page():
     )
     st.markdown("""
     <div class='info-box'><p>
-        📌 Vehicle depreciation is most pronounced during the first three years,
-             when prices typically fall by 40–50%. After this period, the rate of value 
-            loss slows and prices gradually stabilize, particularly once vehicles 
-            reach 10–15 years of age. In some cases, cars older than 25 years may begin 
-            to increase in value, as vintage models become more desirable among collectors 
-            and enthusiasts.
+        📌 Vehicle depreciation is most pronounced during the first three years, when a 
+            typical car loses 40–50% of its initial value. This period reflects the 
+            steepest decline in market price, as new vehicles quickly lose their 
+            “new car” premium. After this initial phase, the rate of depreciation 
+            slows, and prices begin to gradually stabilize, especially once vehicles 
+            reach around 10–15 years of age.
+            Interestingly, some vehicles that are older than 25 years may experience an 
+            increase in value, as certain models transition into the vintage or collector
+            category. These cars become highly sought after by enthusiasts, collectors,
+            and niche markets, often commanding prices that can exceed their original market
+            value.
+                
     </p></div>
     """, unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
     st.markdown("### 🏆 Average Price by Brand")
-    brands = ['BMW', 'Mercedes-Benz', 'Audi', 'Volkswagen', 'Toyota',
-              'Ford', 'Opel', 'Škoda', 'Renault', 'Peugeot']
-    avg_prices = [95_000, 98_000, 92_000, 65_000, 70_000,
-                  55_000, 45_000, 60_000, 48_000, 50_000]
-    fig3 = px.bar(x=brands, y=avg_prices, color=avg_prices,
-                  color_continuous_scale='Blues',
-                  labels={'x': 'Brand', 'y': 'Average Price (PLN)'},
-                  title='Average Price by Brand (Top 10)')
-    fig3.update_layout(**PLOT_LAYOUT, showlegend=False, coloraxis_showscale=False)
-    st.plotly_chart(fig3, use_container_width=True)
+    st.image(
+        "images/eda_median_preice_top20_brands.png",
+        use_container_width=True
+    )
+
+    st.markdown("""
+    <div class='info-box'><p>
+        📌 The bar chart shows the most popular vehicle brands along with their median 
+            prices. Brands with prices above the overall median are highlighted, 
+            representing the premium segment of the market.
+            At the top of the ranking is Mercedes-Benz, with a median price of approximately
+             62,000 PLN. The second and third spots are also taken by German brands — BMW 
+            (~60,000 PLN) and Audi (~50,000 PLN). Another premium European brand, Volvo, 
+            also maintains a relatively high median price of nearly 49,000 PLN.
+            The remaining brands have noticeably lower median prices, typically ranging 
+            from 20,000 PLN to 40,000 PLN, and include vehicles from Asian, French, and 
+            American manufacturers. Their median prices are roughly 2–3 times lower than 
+            those of the leading German brands, highlighting a clear segmentation in the market.
+                            
+    </p></div>
+    """, unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
     st.markdown("### 🎯 Most Important Model Features")
-    feat_names = ['Power (HP)', 'Vehicle Age', 'Mileage (km)', 'Brand', 'Model',
-                  'Fuel Type', 'HP/litre', 'Displacement', 'Country of Origin', 'Transmission']
-    importance = [0.28, 0.22, 0.15, 0.12, 0.08, 0.05, 0.04, 0.03, 0.02, 0.01]
-    fig4 = px.bar(x=importance, y=feat_names, orientation='h',
-                  color=importance, color_continuous_scale='Blues',
-                  labels={'x': 'Importance', 'y': 'Feature'},
-                  title='Top 10 Features — XGBoost Importance')
-    fig4.update_layout(**PLOT_LAYOUT, showlegend=False, coloraxis_showscale=False)
-    st.plotly_chart(fig4, use_container_width=True)
+    st.image(
+        "images/SHAP_feature_importance.png",
+        use_container_width=True
+    )
 
     st.markdown("""
     <div class='info-box'><p>
-        📌 Engine power (HP) is the strongest price predictor · Age and mileage drive depreciation
-        · Brand reputation significantly impacts resale value.
+        📌 The most influential feature in the model is Vehicle Age, with a SHAP importance 
+            of around 0.55. The second most important factor is Engine Power (HP), roughly 
+            three times less influential. Other significant predictors include Vehicle Model 
+            (~0.15) and Mileage (km) (~0.12).
+            These results align well with real-world car pricing: age, engine power, and 
+            mileage are the primary drivers of value. In the final XGBoost model, additional
+            emphasis was placed on Vehicle Age to better differentiate typical cars from 
+            niche or collector vehicles, such as supercars. This confirms that the model’s 
+            feature importance is both reasonable and interpretable.
+            At the lower end, Vehicle Type and Fuel Type have minimal impact, with SHAP 
+            values between 0.01 and 0.03. While these features contribute slightly, they 
+            play a much smaller role compared to the main mechanical and usage-related 
+            characteristics.
+        
     </p></div>
     """, unsafe_allow_html=True)
 
@@ -978,8 +1002,8 @@ to estimate **used car prices**.
 | Model | R² | MAPE | Status |
 |-------|-----|------|--------|
 | Linear Regression | 0.831 | 29.3% | ❌ Baseline |
-| Random Forest | 0.938 | 20.1% | ✅ Good |
-| **XGBoost (tuned)** | **0.926** | **17.2%** | ⭐ Selected |
+| Random Forest | 0.938 | 20.0% | ✅ Good |
+| **XGBoost (tuned)** | **0.924** | **17.2%** | ⭐ Selected |
 
 **Key advantages:**
 - 🎯 Gradient Boosting — sequentially improves predictions
@@ -989,7 +1013,7 @@ to estimate **used car prices**.
 
 ---
 
-### 📊 Model Features (36 total)
+### 📊 Model Features
 
 **Base features:** Brand, Model, Year, Mileage, Power, Displacement, Fuel, Transmission, Drive, Body type, Colour, Location, Condition, Country of origin
 
@@ -1005,18 +1029,18 @@ to estimate **used car prices**.
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
-| **R²** | 92.6% | Explains 93% of price variance ✅ |
-| **RMSE** | 22,918 PLN | Typical absolute error |
-| **MAE** | 8,062 PLN | Mean absolute error |
+| **R²** | 92.4% | Explains ~92.5% of price variance |
+| **RMSE** | 23,048 PLN | Typical absolute error |
+| **MAE** | 8,109 PLN | Mean absolute error |
 | **MAPE** | 17.2% | ~17% relative deviation |
 
 ---
 
 ### 🔬 Training Process
 
-1. **Data collection** — 60,000+ listings from Polish platforms
+1. **Data collection** — 200,000+ listings from Polish platforms
 2. **Preprocessing** — duplicate removal, outlier handling, normalisation
-3. **Feature Engineering** — 36 features
+3. **Feature Engineering** — support for the model
 4. **Model selection** — comparison of 3 algorithms
 5. **Tuning** — Optuna (50+ Bayesian optimisation trials)
 6. **Validation** — 80/20 split, cross-validation
@@ -1047,10 +1071,6 @@ to estimate **used car prices**.
 - **Deployment:** Streamlit, Hugging Face Hub
 - **Visualisations:** Plotly, Folium
 """)
-
-# ============================================================================
-# RENDER
-# ============================================================================
 
 page = st.session_state.page
 if page == 'home':
