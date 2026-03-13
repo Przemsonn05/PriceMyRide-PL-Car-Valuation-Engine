@@ -9,6 +9,7 @@ xgboost
 huggingface_hub
 category-encoders
 scikit-learn
-streamlit
+streamlit==1.42.0
+altair==4.2.2
 folium
 plotly
