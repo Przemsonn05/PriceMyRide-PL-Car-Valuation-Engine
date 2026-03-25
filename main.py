@@ -157,7 +157,7 @@ def save_metrics_report(
         comparison_df = pd.DataFrame(model_comparison).T
         f.write(comparison_df.to_string())
     
-    print(f"✓ Metrics report saved: {save_path}")
+    print(f"Metrics report saved: {save_path}")
 
 def step_1_load_and_clean_data() -> pd.DataFrame:
     """Step 1: Load and clean raw data"""
@@ -165,19 +165,19 @@ def step_1_load_and_clean_data() -> pd.DataFrame:
     
     print("Loading raw data...")
     df_raw = load_raw_data(config.RAW_DATA_PATH)
-    print(f"✓ Loaded {len(df_raw):,} rows, {len(df_raw.columns)} columns")
+    print(f"Loaded {len(df_raw):,} rows, {len(df_raw.columns)} columns")
     
     print("\nCleaning data...")
     df_clean = clean_car_data(df_raw)
-    print(f"✓ After cleaning: {len(df_clean):,} rows")
-    print(f"✓ Duplicates removed: {len(df_raw) - len(df_clean):,}")
+    print(f"After cleaning: {len(df_clean):,} rows")
+    print(f"Duplicates removed: {len(df_raw) - len(df_clean):,}")
     
     save_processed_data(df_clean, config.PROCESSED_DATA_PATH)
     
     print("\nData Summary:")
-    print(f"  Price range: {df_clean['price_PLN'].min():,.0f} - {df_clean['price_PLN'].max():,.0f} PLN")
-    print(f"  Median price: {df_clean['price_PLN'].median():,.0f} PLN")
-    print(f"  Missing values: {df_clean.isnull().sum().sum()}")
+    print(f"Price range: {df_clean['price_PLN'].min():,.0f} - {df_clean['price_PLN'].max():,.0f} PLN")
+    print(f"Median price: {df_clean['price_PLN'].median():,.0f} PLN")
+    print(f"Missing values: {df_clean.isnull().sum().sum()}")
     
     return df_clean
 
@@ -191,49 +191,49 @@ def step_2_exploratory_analysis(df: pd.DataFrame) -> None:
     
     print("Generating EDA visualizations...")
     
-    print("  1/6 Price distribution...")
+    print("1/6 Price distribution...")
     fig = plot_price_distribution(
         df, 
         save_path=config.IMAGES_DIR / "eda_price_distribution.png"
     )
     plt.close(fig)
     
-    print("  2/6 Depreciation analysis...")
+    print("2/6 Depreciation analysis...")
     fig = plot_depreciation_analysis(
         df,
         save_path=config.IMAGES_DIR / "eda_depreciation_analysis.png"
     )
     plt.close(fig)
  
-    print("  3/6 Feature relationships...")
+    print("3/6 Feature relationships...")
     fig = plot_numerical_relationships(
         df,
         save_path=config.IMAGES_DIR / "eda_numerical_relationships.png"
     )
     plt.close(fig)
 
-    print("  4/6 Mileage analysis...")
+    print("4/6 Mileage analysis...")
     fig = plot_mileage_vs_price_by_age(
         df,
         save_path=config.IMAGES_DIR / "eda_mileage_by_age.png"
     )
     plt.close(fig)
     
-    print("  5/6 Fuel type trends...")
+    print("5/6 Fuel type trends...")
     fig = plot_fuel_type_trends(
         df,
         save_path=config.IMAGES_DIR / "eda_fuel_trends.png"
     )
     plt.close(fig)
     
-    print("  6/6 Correlation heatmap...")
+    print("6/6 Correlation heatmap...")
     fig = plot_correlation_heatmap(
         df,
         save_path=config.IMAGES_DIR / "eda_correlation_heatmap.png"
     )
     plt.close(fig)
     
-    print(f"\n✓ All EDA plots saved to: {config.IMAGES_DIR}")
+    print(f"\nAll EDA plots saved to: {config.IMAGES_DIR}")
 
 def debug_nan_issues(df: pd.DataFrame, stage: str = "") -> None:
     """Debug helper to identify NaN issues"""
@@ -250,9 +250,9 @@ def debug_nan_issues(df: pd.DataFrame, stage: str = "") -> None:
         if col in df.columns:
             nan_count = df[col].isnull().sum()
             if nan_count > 0:
-                print(f"⚠️  {col}: {nan_count:,} NaN values ({nan_count/len(df)*100:.2f}%)")
+                print(f"{col}: {nan_count:,} NaN values ({nan_count/len(df)*100:.2f}%)")
             else:
-                print(f"✓ {col}: No NaN values")
+                print(f"{col}: No NaN values")
     
     print(f"{'='*80}\n")
 
@@ -264,12 +264,12 @@ def step_3_feature_engineering(df: pd.DataFrame) -> tuple:
     
     print("Creating base features...")
     df_features = engineer_base_features(df)
-    print(f"✓ Created {len(df_features.columns) - len(df.columns)} new features")
+    print(f"Created {len(df_features.columns) - len(df.columns)} new features")
     
     if df_features['price_PLN'].isnull().any():
         before_len = len(df_features)
         df_features = df_features[df_features['price_PLN'].notna()]
-        print(f"⚠️  Dropped {before_len - len(df_features)} rows with missing target")
+        print(f"Dropped {before_len - len(df_features)} rows with missing target")
     
     print("\nSplitting data...")
     from sklearn.model_selection import train_test_split
@@ -283,8 +283,8 @@ def step_3_feature_engineering(df: pd.DataFrame) -> tuple:
         random_state=config.RANDOM_STATE
     )
     
-    print(f"✓ Train set: {len(X_train):,} samples")
-    print(f"✓ Test set:  {len(X_test):,} samples")
+    print(f"Train set: {len(X_train):,} samples")
+    print(f"Test set:  {len(X_test):,} samples")
 
     print("\nApplying advanced transformations...")
     X_train, X_test = apply_advanced_transformations(X_train, X_test)
@@ -292,19 +292,19 @@ def step_3_feature_engineering(df: pd.DataFrame) -> tuple:
     print("\nChecking for NaN in X_train...")
     nan_cols_train = X_train.columns[X_train.isnull().any()].tolist()
     if nan_cols_train:
-        print(f"⚠️  Columns with NaN in X_train: {nan_cols_train}")
+        print(f"Columns with NaN in X_train: {nan_cols_train}")
     else:
-        print("✓ No NaN in X_train")
+        print("No NaN in X_train")
 
     debug_nan_issues(X_train, "AFTER feature engineering")
     
-    print(f"✓ Final feature count: {X_train.shape[1]}")
-    print(f"✓ Missing values: Train={X_train.isnull().sum().sum()}, Test={X_test.isnull().sum().sum()}")
+    print(f"Final feature count: {X_train.shape[1]}")
+    print(f"Missing values: Train={X_train.isnull().sum().sum()}, Test={X_test.isnull().sum().sum()}")
     
     numeric_cols = X_train.select_dtypes(include=[np.number]).columns
     for col in numeric_cols:
         if X_train[col].isnull().any():
-            print(f"⚠️  Filling remaining NaN in {col} with median...")
+            print(f"Filling remaining NaN in {col} with median...")
             fill_value = X_train[col].median()
             X_train[col] = X_train[col].fillna(fill_value)
             X_test[col] = X_test[col].fillna(fill_value)
@@ -335,7 +335,7 @@ def step_4_train_models(
         n_folds=config.RIDGE_CV_FOLDS
     )
     models['Ridge'] = ridge_model
-    print("✓ Ridge model trained\n")
+    print("Ridge model trained\n")
   
     print_header("Training Model 2: Random Forest", "-")
     rf_model = train_random_forest_search(
@@ -345,7 +345,7 @@ def step_4_train_models(
         n_folds=config.RF_CV_FOLDS
     )
     models['RandomForest'] = rf_model
-    print("✓ Random Forest model trained\n")
+    print("Random Forest model trained\n")
    
     print_header("Training Model 3: XGBoost (Optuna)", "-")
     xgb_model = train_xgboost_optuna(
@@ -355,7 +355,7 @@ def step_4_train_models(
         n_folds=config.XGB_CV_FOLDS
     )
     models['XGBoost_Base'] = xgb_model
-    print("✓ XGBoost base model trained\n")
+    print("XGBoost base model trained\n")
  
     print_header("Training Model 4: XGBoost (Weighted)", "-")
     xgb_weighted = train_xgboost_weighted(
@@ -364,7 +364,7 @@ def step_4_train_models(
         n_trials=config.XGB_N_TRIALS
     )
     models['XGBoost_Weighted'] = xgb_weighted
-    print("✓ XGBoost weighted model trained\n")
+    print("XGBoost weighted model trained\n")
     
     return models
 
@@ -418,7 +418,7 @@ def step_5_evaluate_models(
     print(comparison_df.to_string())
     
     best_model = comparison_df['R2'].idxmax()
-    print(f"\n✓ Best Model: {best_model} (R^2 = {comparison_df.loc[best_model, 'R2']:.4f})")
+    print(f"\nBest Model: {best_model} (R^2 = {comparison_df.loc[best_model, 'R2']:.4f})")
     
     return metrics_dict, model_comparison
 
@@ -438,14 +438,14 @@ def step_6_generate_visualizations(
     
     print("Generating evaluation plots...")
     
-    print("  1/8 Model comparison...")
+    print("1/8 Model comparison...")
     fig = create_model_comparison_plot(
         model_comparison,
         save_path=config.IMAGES_DIR / "eval_model_comparison.png"
     )
     plt.close(fig)
     
-    print("  2/8 Ridge diagnostics...")
+    print("2/8 Ridge diagnostics...")
     ridge_preds = metrics_dict['Ridge']['predictions']['y_test_pred']
     fig = plot_regression_diagnostics(
         y_test,
@@ -455,7 +455,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  3/8 Ridge coefficients...")
+    print("3/8 Ridge coefficients...")
     fig = plot_ridge_coefficients(
         models['Ridge'],
         top_n=15,
@@ -463,7 +463,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  4/8 Random Forest feature importance...")
+    print("4/8 Random Forest feature importance...")
     fig = plot_tree_feature_importance(
         models['RandomForest'],
         top_n=20,
@@ -471,7 +471,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  5/8 XGBoost diagnostics...")
+    print("5/8 XGBoost diagnostics...")
     xgb_preds = metrics_dict['XGBoost_Weighted']['predictions']['y_test_pred']
     fig = plot_regression_diagnostics(
         y_test,
@@ -481,7 +481,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  6/8 XGBoost feature importance...")
+    print("6/8 XGBoost feature importance...")
     fig = plot_tree_feature_importance(
         models['XGBoost_Weighted'],
         top_n=20,
@@ -489,7 +489,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  7/8 Learning curves...")
+    print("7/8 Learning curves...")
     fig = plot_learning_curves(
         models['XGBoost_Weighted'],
         X_train,
@@ -500,7 +500,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print("  8/8 Error analysis by age...")
+    print("8/8 Error analysis by age...")
     fig = plot_residuals_vs_age(
         X_test,
         y_test,
@@ -509,7 +509,7 @@ def step_6_generate_visualizations(
     )
     plt.close(fig)
     
-    print(f"\n✓ All evaluation plots saved to: {config.IMAGES_DIR}")
+    print(f"\nAll evaluation plots saved to: {config.IMAGES_DIR}")
 
 
 def step_7_save_models(models: dict) -> None:
@@ -525,9 +525,9 @@ def step_7_save_models(models: dict) -> None:
         filepath = config.MODELS_DIR / filename
         
         joblib.dump(model, filepath)
-        print(f"  ✓ Saved: {filename}")
+        print(f"Saved: {filename}")
     
-    print(f"\n✓ All models saved to: {config.MODELS_DIR}")
+    print(f"\nAll models saved to: {config.MODELS_DIR}")
     
     upload_to_hf = input("\nUpload models to Hugging Face? (y/n): ").lower() == 'y'
     
@@ -539,9 +539,9 @@ def step_7_save_models(models: dict) -> None:
                 for name, model in models.items()
             }
             upload_models_to_hf(models_dict, config.HF_REPO_ID)
-            print("✓ Models uploaded to Hugging Face")
+            print("Models uploaded to Hugging Face")
         except Exception as e:
-            print(f"⚠️  Upload failed: {e}")
+            print(f"Upload failed: {e}")
             print("   Models are still saved locally.")
 
 def run_tests() -> bool:
@@ -555,9 +555,9 @@ def run_tests() -> bool:
         df = load_raw_data(config.RAW_DATA_PATH)
         assert len(df) > 0, "DataFrame is empty"
         assert 'Price' in df.columns, "Price column missing"
-        print("  ✓ PASSED\n")
+        print(" PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
     
     print("Test 2: Data Preprocessing...")
@@ -567,9 +567,9 @@ def run_tests() -> bool:
         assert 'price_PLN' in df_clean.columns, "price_PLN not created"
         assert 'Price' not in df_clean.columns, "Price not removed"
         assert len(df_clean) > 0, "All data removed"
-        print("  ✓ PASSED\n")
+        print("PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
    
     print("Test 3: Feature Engineering...")
@@ -586,9 +586,9 @@ def run_tests() -> bool:
         for feat in required_features:
             assert feat in df_features.columns, f"Feature {feat} not created"
         
-        print("  ✓ PASSED\n")
+        print("PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
     
     print("Test 4: Preprocessors...")
@@ -599,9 +599,9 @@ def run_tests() -> bool:
         assert preprocessor_tree is not None, "Tree preprocessor is None"
         assert preprocessor_mastered is not None, "Mastered preprocessor is None"
         
-        print("  ✓ PASSED\n")
+        print("PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
    
     print("Test 5: Visualization Functions...")
@@ -618,9 +618,9 @@ def run_tests() -> bool:
         fig = plot_depreciation_analysis(df_clean)
         plt.close(fig)
         
-        print("  ✓ PASSED\n")
+        print("PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
   
     print("Test 6: Model Training Functions...")
@@ -630,16 +630,16 @@ def run_tests() -> bool:
             train_random_forest_search,
             train_xgboost_optuna
         )
-        print("  ✓ PASSED\n")
+        print("PASSED\n")
     except Exception as e:
-        print(f"  ✗ FAILED: {e}\n")
+        print(f"FAILED: {e}\n")
         all_passed = False
 
     print("="*80)
     if all_passed:
-        print("✓ ALL TESTS PASSED")
+        print("ALL TESTS PASSED")
     else:
-        print("✗ SOME TESTS FAILED")
+        print("SOME TESTS FAILED")
     print("="*80)
     
     return all_passed
@@ -773,9 +773,9 @@ def main():
             }
             step_7_save_models(models)
         except FileNotFoundError as e:
-            print(f"❌ BŁĄD: Nie znaleziono plików modeli! Uruchom najpierw --mode train.\nSzczegóły: {e}")
+            print(f"ERROR: File not found error: {e}")
         except Exception as e:
-            print(f"❌ Inny błąd: {e}")
+            print(f"Other error: {e}")
 
 if __name__ == "__main__":
     main()
