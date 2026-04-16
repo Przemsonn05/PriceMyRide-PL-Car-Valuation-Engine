@@ -17,6 +17,9 @@ Usage:
     python main.py --mode visualize         # Generate visualizations only
     python main.py --mode evaluate          # Checkpoint between modes
     python main.py --mode export            # Load models to HuggingFace
+    python main.py --mode update            # Fetch new listings (incremental)
+    python main.py --mode collect           # Collect balanced stratified dataset
+    python main.py --mode collect --target-rows 200000 --mock   # Mock test
 """
 
 import sys
@@ -24,6 +27,7 @@ import argparse
 import warnings
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -74,7 +78,8 @@ class Config:
     
     PROJECT_ROOT = Path(__file__).parent
     DATA_DIR = PROJECT_ROOT / "data"
-    RAW_DATA_PATH = DATA_DIR / "Car_sale_ads.csv"
+    RAW_DATA_PATH = DATA_DIR / "Car_sale_ads.csv"          # legacy fallback only
+    BALANCED_DATA_PATH = DATA_DIR / "Car_sale_ads_balanced.csv"  # primary scraped dataset
     PROCESSED_DATA_PATH = DATA_DIR / "processed" / "cars_cleaned.csv"
     MODELS_DIR = PROJECT_ROOT / "models"
     IMAGES_DIR = PROJECT_ROOT / "images"
@@ -160,25 +165,41 @@ def save_metrics_report(
     print(f"Metrics report saved: {save_path}")
 
 def step_1_load_and_clean_data() -> pd.DataFrame:
-    """Step 1: Load and clean raw data"""
+    """Step 1: Load and clean data.
+
+    Uses the scraped balanced dataset (Car_sale_ads_balanced.csv) when available
+    — this is the primary, up-to-date source (2024–2026 prices).
+    Falls back to the legacy raw dataset only when the balanced file does not exist.
+    The two datasets are NEVER merged: pre-2022 prices are incompatible with
+    current market prices and would confuse the models.
+    """
     print_step(1, 7, "DATA LOADING & PREPROCESSING")
-    
-    print("Loading raw data...")
-    df_raw = load_raw_data(config.RAW_DATA_PATH)
-    print(f"Loaded {len(df_raw):,} rows, {len(df_raw.columns)} columns")
-    
-    print("\nCleaning data...")
-    df_clean = clean_car_data(df_raw)
-    print(f"After cleaning: {len(df_clean):,} rows")
-    print(f"Duplicates removed: {len(df_raw) - len(df_clean):,}")
-    
+
+    balanced_path = config.DATA_DIR / "Car_sale_ads_balanced.csv"
+
+    if balanced_path.exists():
+        print(f"Loading scraped dataset from {balanced_path.name} ...")
+        df_clean = pd.read_csv(balanced_path)
+        print(f"Loaded {len(df_clean):,} rows, {len(df_clean.columns)} columns")
+        print("(Using current-price scraping data — legacy dataset ignored)")
+    else:
+        print(f"Scraped dataset not found. Loading legacy data from {config.RAW_DATA_PATH.name} ...")
+        print("  TIP: run  python main.py --mode collect --target-rows 200000  to build the up-to-date dataset.")
+        df_raw = load_raw_data(config.RAW_DATA_PATH)
+        print(f"Loaded {len(df_raw):,} rows, {len(df_raw.columns)} columns")
+        print("\nCleaning data...")
+        df_clean = clean_car_data(df_raw)
+        print(f"After cleaning: {len(df_clean):,} rows")
+        print(f"Duplicates removed: {len(df_raw) - len(df_clean):,}")
+
     save_processed_data(df_clean, config.PROCESSED_DATA_PATH)
-    
+
     print("\nData Summary:")
-    print(f"Price range: {df_clean['price_PLN'].min():,.0f} - {df_clean['price_PLN'].max():,.0f} PLN")
-    print(f"Median price: {df_clean['price_PLN'].median():,.0f} PLN")
+    print(f"Price range:    {df_clean['price_PLN'].min():,.0f} - {df_clean['price_PLN'].max():,.0f} PLN")
+    print(f"Median price:   {df_clean['price_PLN'].median():,.0f} PLN")
+    print(f"Year range:     {int(df_clean['Production_year'].min())} - {int(df_clean['Production_year'].max())}")
     print(f"Missing values: {df_clean.isnull().sum().sum()}")
-    
+
     return df_clean
 
 
@@ -187,7 +208,7 @@ def step_2_exploratory_analysis(df: pd.DataFrame) -> None:
     print_step(2, 7, "EXPLORATORY DATA ANALYSIS")
     
     if 'Production_year' in df.columns and 'Vehicle_age' not in df.columns:
-        df['Vehicle_age'] = 2021 - df['Production_year']
+        df['Vehicle_age'] = datetime.now().year - df['Production_year']
     
     print("Generating EDA visualizations...")
     
@@ -317,11 +338,8 @@ def step_3_feature_engineering(df: pd.DataFrame) -> tuple:
 
 def step_4_train_models(
     X_train: pd.DataFrame,
-    X_test: pd.DataFrame,
     y_train: pd.Series,
-    y_test: pd.Series,
     y_train_log: pd.Series,
-    y_test_log: pd.Series
 ) -> dict:
     """Step 4: Model Training"""
     print_step(4, 7, "MODEL TRAINING")
@@ -407,7 +425,7 @@ def step_5_evaluate_models(
         
         model_comparison[model_name] = test_metrics
         
-        print(f"  Test R²:   {test_metrics['R2']:.4f}")
+        print(f"  Test R^2:  {test_metrics['R2']:.4f}")
         print(f"  Test MAPE: {test_metrics['MAPE']*100:.2f}%")
         print(f"  Test MAE:  {test_metrics['MAE']:,.0f} PLN")
     
@@ -549,75 +567,80 @@ def run_tests() -> bool:
     print_header("RUNNING PROJECT TESTS")
     
     all_passed = True
-    
+
+    # Determine which data source to use for tests
+    _test_data_path = (
+        config.PROCESSED_DATA_PATH if config.PROCESSED_DATA_PATH.exists()
+        else config.BALANCED_DATA_PATH if config.BALANCED_DATA_PATH.exists()
+        else config.RAW_DATA_PATH
+    )
+    _using_scraped = _test_data_path != config.RAW_DATA_PATH
+    print(f"Using dataset: {_test_data_path.name}\n")
+
     print("Test 1: Data Loading...")
     try:
-        df = load_raw_data(config.RAW_DATA_PATH)
+        df = pd.read_csv(_test_data_path) if _using_scraped else load_raw_data(_test_data_path)
         assert len(df) > 0, "DataFrame is empty"
-        assert 'Price' in df.columns, "Price column missing"
+        assert 'price_PLN' in df.columns, "price_PLN column missing"
         print(" PASSED\n")
     except Exception as e:
         print(f"FAILED: {e}\n")
         all_passed = False
-    
+
     print("Test 2: Data Preprocessing...")
     try:
-        df_raw = load_raw_data(config.RAW_DATA_PATH)
-        df_clean = clean_car_data(df_raw)
-        assert 'price_PLN' in df_clean.columns, "price_PLN not created"
-        assert 'Price' not in df_clean.columns, "Price not removed"
+        df_clean = pd.read_csv(_test_data_path) if _using_scraped else clean_car_data(load_raw_data(_test_data_path))
+        assert 'price_PLN' in df_clean.columns, "price_PLN not present"
         assert len(df_clean) > 0, "All data removed"
         print("PASSED\n")
     except Exception as e:
         print(f"FAILED: {e}\n")
         all_passed = False
-   
+
     print("Test 3: Feature Engineering...")
     try:
-        df_raw = load_raw_data(config.RAW_DATA_PATH)
-        df_clean = clean_car_data(df_raw)
+        df_clean = pd.read_csv(_test_data_path) if _using_scraped else clean_car_data(load_raw_data(_test_data_path))
         df_features = engineer_base_features(df_clean)
-        
+
         required_features = [
             'Age_category', 'Is_new_car', 'Is_old_car',
             'Mileage_per_year', 'HP_per_liter', 'Is_premium'
         ]
-        
+
         for feat in required_features:
             assert feat in df_features.columns, f"Feature {feat} not created"
-        
+
         print("PASSED\n")
     except Exception as e:
         print(f"FAILED: {e}\n")
         all_passed = False
-    
+
     print("Test 4: Preprocessors...")
     try:
         preprocessor_tree = get_preprocessor_tree()
         preprocessor_mastered = get_preprocessor_mastered()
-        
+
         assert preprocessor_tree is not None, "Tree preprocessor is None"
         assert preprocessor_mastered is not None, "Mastered preprocessor is None"
-        
+
         print("PASSED\n")
     except Exception as e:
         print(f"FAILED: {e}\n")
         all_passed = False
-   
+
     print("Test 5: Visualization Functions...")
     try:
-        df_raw = load_raw_data(config.RAW_DATA_PATH)
-        df_clean = clean_car_data(df_raw)
-        
+        df_clean = pd.read_csv(_test_data_path) if _using_scraped else clean_car_data(load_raw_data(_test_data_path))
+
         if 'Vehicle_age' not in df_clean.columns and 'Production_year' in df_clean.columns:
-            df_clean['Vehicle_age'] = 2021 - df_clean['Production_year']
-  
+            df_clean['Vehicle_age'] = datetime.now().year - df_clean['Production_year']
+
         fig = plot_price_distribution(df_clean)
         plt.close(fig)
-        
+
         fig = plot_depreciation_analysis(df_clean)
         plt.close(fig)
-        
+
         print("PASSED\n")
     except Exception as e:
         print(f"FAILED: {e}\n")
@@ -657,7 +680,7 @@ def run_full_pipeline() -> None:
         
         X_train, X_test, y_train, y_test, y_train_log, y_test_log = step_3_feature_engineering(df_clean)
         
-        models = step_4_train_models(X_train, X_test, y_train, y_test, y_train_log, y_test_log)
+        models = step_4_train_models(X_train, y_train, y_train_log)
         
         step_7_save_models(models)
 
@@ -696,6 +719,142 @@ def run_full_pipeline() -> None:
         sys.exit(1)
 
 
+def run_data_collect(
+    target_rows: int = 200_000,
+    detail_mode: bool = False,
+    mock: bool = False,
+    output_path: Optional[Path] = None,
+) -> None:
+    """
+    Collect a stratified, balanced dataset from Otomoto and save it to CSV.
+
+    Fetches listings across all segments defined in STRATIFIED_CONFIG
+    (popular brands, luxury brands, electric vehicles), then applies
+    stratified sampling to produce a balanced dataset.
+
+    The result is saved to ``output_path`` (default: data/Car_sale_ads_balanced.csv).
+    This file replaces the old Car_sale_ads.csv as the primary training source —
+    the two datasets are never merged (pre-2022 prices are not compatible with
+    current market prices after the 2022–2024 car price boom).
+
+    Parameters
+    ----------
+    target_rows : int
+        Target total rows for the balanced output (default 200 000).
+    detail_mode : bool
+        Fetch individual listing pages for full field coverage.
+    mock : bool
+        Use synthetic data — no network requests (testing only).
+    output_path : Path, optional
+        Where to save the balanced CSV.  Defaults to
+        ``data/Car_sale_ads_balanced.csv``.
+    """
+    from src.data_fetcher import fetch_balanced_dataset
+    from src.data_cleaning import clean_data, apply_stratified_sampling, validate_schema
+
+    if output_path is None:
+        output_path = config.DATA_DIR / "Car_sale_ads_balanced.csv"
+
+    print_header("STRATIFIED DATA COLLECTION")
+    print(f"Target rows:   {target_rows:,}")
+    print(f"Detail mode:   {'Yes' if detail_mode else 'No'}")
+    print(f"Mock mode:     {'Yes' if mock else 'No'}")
+    print(f"Output path:   {output_path}\n")
+
+    start_time = datetime.now()
+
+    # 1. Fetch raw stratified listings
+    print("Step 1/3  Fetching stratified listings from Otomoto...")
+    df_raw = fetch_balanced_dataset(
+        target_rows=target_rows,
+        detail_mode=detail_mode,
+        mock=mock,
+    )
+    print(f"  Raw rows fetched: {len(df_raw):,}")
+    if "_category" in df_raw.columns:
+        print(f"  Category breakdown:\n{df_raw['_category'].value_counts().to_string()}")
+
+    # 2. Normalize + clean to schema
+    print("\nStep 2/3  Cleaning and normalizing to project schema...")
+    df_raw_no_cat = df_raw.drop(columns=["_category"], errors="ignore")
+    df_clean = clean_data(df_raw_no_cat)
+    print(f"  Rows after cleaning: {len(df_clean):,}")
+
+    # Re-attach category for sampling
+    if "_category" in df_raw.columns:
+        df_clean = df_clean.copy()
+        df_clean["_category"] = df_raw["_category"].values[: len(df_clean)]
+
+    # 3. Apply stratified sampling
+    print("\nStep 3/3  Applying stratified sampling...")
+    df_balanced = apply_stratified_sampling(df_clean, target_rows=target_rows)
+    df_balanced = df_balanced.drop(columns=["_category", "offer_id"], errors="ignore")
+    print(f"  Final balanced rows: {len(df_balanced):,}")
+
+    # Schema validation
+    validation = validate_schema(df_balanced)
+    if not validation["valid"]:
+        print(f"  [WARN] Schema issues: {validation['issues']}")
+
+    # Save
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df_balanced.to_csv(output_path, index=False)
+
+    duration = (datetime.now() - start_time).total_seconds()
+    print_header("COLLECTION COMPLETE")
+    print(f"Balanced rows saved: {len(df_balanced):,}")
+    print(f"Output file:         {output_path}")
+    print(f"Duration:            {duration:.1f}s  ({duration / 60:.1f} min)")
+
+
+def run_data_update(pages: int = 10, detail_mode: bool = False, mock: bool = False) -> None:
+    """
+    Fetch new car listings from Otomoto and append them to the raw dataset.
+
+    This function implements incremental data collection:
+    1. Scrapes current Otomoto listings (search results, newest first)
+    2. Normalizes fields to match the project schema
+    3. Deduplicates against the existing dataset by offer ID
+    4. Appends only genuinely new rows to data/Car_sale_ads.csv
+
+    Parameters
+    ----------
+    pages : int
+        Number of Otomoto search pages to fetch (32 listings each).
+    detail_mode : bool
+        If True, fetch individual listing pages for full field coverage
+        (Drive, Colour, body type, condition, doors). Slower but more complete.
+    mock : bool
+        Use synthetic data instead of live scraping (for testing).
+
+    Note
+    ----
+    Historical listings (2021–2024) are not available via scraping —
+    Otomoto only exposes active offers. This mode collects future listings
+    for continuous dataset enrichment.
+    """
+    from src.data_fetcher import fetch_incremental
+
+    print_header("DATA UPDATE: FETCHING NEW LISTINGS FROM OTOMOTO")
+    print(f"Pages to fetch: {pages}  (~{pages * 32} listings)")
+    print(f"Detail mode:    {'Yes (fetches individual pages)' if detail_mode else 'No (search results only)'}")
+    print(f"Mock mode:      {'Yes' if mock else 'No'}\n")
+
+    start_time = datetime.now()
+    new_rows = fetch_incremental(
+        data_path=config.BALANCED_DATA_PATH,
+        pages=pages,
+        detail_mode=detail_mode,
+        mock=mock,
+    )
+
+    duration = (datetime.now() - start_time).total_seconds()
+    print_header("UPDATE COMPLETE")
+    print(f"New rows appended: {len(new_rows):,}")
+    print(f"Dataset path:      {config.BALANCED_DATA_PATH}")
+    print(f"Duration:          {duration:.1f}s")
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -705,16 +864,52 @@ def main():
         '--mode',
         type=str,
         default='full',
-        choices=['full', 'test', 'train', 'visualize', 'evaluate', 'export'],
+        choices=['full', 'test', 'train', 'visualize', 'evaluate', 'export', 'update', 'collect'],
         help='Execution mode (default: full)'
     )
-    
+    parser.add_argument(
+        '--pages',
+        type=int,
+        default=10,
+        help='Number of Otomoto search pages to fetch in update mode (default: 10)'
+    )
+    parser.add_argument(
+        '--target-rows',
+        type=int,
+        default=200_000,
+        help='Target balanced row count for collect mode (default: 200000)'
+    )
+    parser.add_argument(
+        '--detail',
+        action='store_true',
+        help='Fetch full listing details in update/collect mode (slower, more complete)'
+    )
+    parser.add_argument(
+        '--mock',
+        action='store_true',
+        help='Use mock/synthetic data instead of live scraping (testing only)'
+    )
+
     args = parser.parse_args()
     
-    if args.mode == 'test':
+    if args.mode == 'collect':
+        run_data_collect(
+            target_rows=args.target_rows,
+            detail_mode=args.detail,
+            mock=args.mock,
+        )
+
+    elif args.mode == 'update':
+        run_data_update(
+            pages=args.pages,
+            detail_mode=args.detail,
+            mock=args.mock,
+        )
+
+    elif args.mode == 'test':
         success = run_tests()
         sys.exit(0 if success else 1)
-        
+
     elif args.mode == 'full':
         run_full_pipeline()
         
@@ -722,13 +917,16 @@ def main():
         print_header("TRAINING MODELS ONLY")
         df_clean = step_1_load_and_clean_data()
         X_train, X_test, y_train, y_test, y_train_log, y_test_log = step_3_feature_engineering(df_clean)
-        models = step_4_train_models(X_train, X_test, y_train, y_test, y_train_log, y_test_log)
+        models = step_4_train_models(X_train, y_train, y_train_log)
         step_7_save_models(models)
         
     elif args.mode == 'visualize':
         print_header("GENERATING VISUALIZATIONS ONLY")
-        df_clean = load_raw_data(config.RAW_DATA_PATH)
-        df_clean = clean_car_data(df_clean)
+        _vis_path = (
+            config.PROCESSED_DATA_PATH if config.PROCESSED_DATA_PATH.exists()
+            else config.BALANCED_DATA_PATH
+        )
+        df_clean = pd.read_csv(_vis_path)
         step_2_exploratory_analysis(df_clean)
 
     elif args.mode == 'evaluate':

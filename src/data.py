@@ -47,4 +47,4 @@ def save_processed_data(df: pd.DataFrame, file_path: Union[str, Path]) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
     
     df.to_csv(file_path, index=False)
-    print(f"✓ Saved to: {file_path}")
+    print(f"[OK] Saved to: {file_path}")

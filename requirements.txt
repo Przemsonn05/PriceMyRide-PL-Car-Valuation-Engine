@@ -2,6 +2,8 @@ pandas
 numpy
 joblib
 requests
+beautifulsoup4
+lxml
 scikit-learn==1.7.2
 xgboost==2.0.0
 category-encoders

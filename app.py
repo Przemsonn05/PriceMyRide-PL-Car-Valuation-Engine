@@ -6,314 +6,495 @@ import plotly.express as px
 import plotly.graph_objects as go
 from huggingface_hub import hf_hub_download
 from urllib.parse import urlencode
+from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
+CURRENT_YEAR = datetime.now().year
+
 st.set_page_config(
-    page_title="Car Price Prediction – Poland",
-    page_icon="🚗",
+    page_title="CarVal PL - Car Price Prediction",
+    page_icon="https://em-content.zobj.net/source/twitter/408/automobile_1f697.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-if 'sidebar_visible' not in st.session_state:
-    st.session_state.sidebar_visible = True
-
+# ---------------------------------------------------------------------------
+# Global CSS
+# ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
-/* ── Background and global ── */
+/* -- Base -- */
 .stApp {
-    background: #0a0e1a;
-    font-family: 'DM Sans', sans-serif;
+    background: #0a0f1a;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
+html, body { scroll-behavior: smooth; }
 
-/* ── Sidebar ── */
+/* -- Sidebar -- */
 [data-testid="stSidebar"] {
-    background: #0f1628 !important;
-    border-right: 1px solid rgba(99,179,237,0.15);
+    background: linear-gradient(195deg, #0d1321 0%, #101829 50%, #0b1120 100%) !important;
+    border-right: 1px solid rgba(56,189,248,0.08);
 }
-
 [data-testid="stSidebar"] .stButton > button {
     background: transparent;
-    border: 1px solid rgba(99,179,237,0.2);
-    color: #a0aec0;
+    border: 1px solid rgba(56,189,248,0.10);
+    color: #64748b;
     border-radius: 10px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
     font-weight: 500;
-    transition: all 0.25s ease;
+    transition: all 0.2s ease;
     text-align: left;
     padding: 10px 16px;
+    width: 100%;
 }
-
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(99,179,237,0.1);
-    border-color: #63b3ed;
-    color: white;
-    transform: translateX(4px);
+    background: rgba(56,189,248,0.07);
+    border-color: rgba(56,189,248,0.30);
+    color: #e2e8f0;
+    transform: translateX(3px);
+}
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: rgba(14,165,233,0.12) !important;
+    border-color: rgba(56,189,248,0.45) !important;
+    color: #7dd3fc !important;
+    font-weight: 600 !important;
 }
 
-/* ── General text ── */
+/* -- Typography -- */
 h1, h2, h3, h4, h5 {
-    font-family: 'Syne', sans-serif !important;
-    color: #f7fafc !important;
-    letter-spacing: -0.02em;
+    font-family: 'Inter', sans-serif !important;
+    color: #f1f5f9 !important;
+    letter-spacing: -0.025em;
 }
+p, li, span { color: #94a3b8; }
 
-p, li, span {
-    color: #cbd5e0;
-}
-
-/* ── Main CTA button ── */
+/* -- CTA button -- */
 .stButton > button {
-    background: linear-gradient(135deg, #3182ce 0%, #805ad5 100%);
+    background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
     color: white !important;
     border: none;
     border-radius: 12px;
-    padding: 14px 32px;
-    font-family: 'Syne', sans-serif;
+    padding: 13px 28px;
+    font-family: 'Inter', sans-serif;
     font-weight: 700;
-    font-size: 16px;
-    letter-spacing: 0.02em;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 20px rgba(49,130,206,0.3);
+    font-size: 14px;
+    letter-spacing: 0.01em;
+    transition: all 0.25s ease;
+    box-shadow: 0 4px 20px rgba(14,165,233,0.25);
 }
-
 .stButton > button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(49,130,206,0.5);
+    box-shadow: 0 8px 30px rgba(14,165,233,0.40);
 }
 
-/* ── Glass cards ── */
+/* -- Glass cards -- */
 .glass-card {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 20px;
-    padding: 28px;
-    margin-bottom: 20px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px 24px;
+    margin-bottom: 16px;
     backdrop-filter: blur(12px);
-    transition: all 0.3s ease;
+    transition: all 0.25s ease;
 }
-
 .glass-card:hover {
-    background: rgba(255,255,255,0.07);
-    border-color: rgba(99,179,237,0.3);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    background: rgba(255,255,255,0.045);
+    border-color: rgba(56,189,248,0.22);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
 }
 
-/* ── Price card ── */
+/* -- Price result card -- */
 .price-card {
-    background: linear-gradient(135deg, #1a365d 0%, #2d3748 50%, #1a202c 100%);
-    border: 1px solid rgba(99,179,237,0.4);
-    border-radius: 24px;
-    padding: 48px 40px;
+    background: linear-gradient(145deg, #0c1a2e 0%, #111d35 50%, #0d1525 100%);
+    border: 1px solid rgba(56,189,248,0.35);
+    border-radius: 20px;
+    padding: 48px 36px 40px;
     text-align: center;
-    margin: 32px 0;
-    box-shadow: 0 0 60px rgba(49,130,206,0.2), inset 0 1px 0 rgba(255,255,255,0.1);
-    position: relative;
-    overflow: hidden;
+    margin: 28px 0 20px;
+    box-shadow: 0 0 60px rgba(14,165,233,0.12), inset 0 1px 0 rgba(255,255,255,0.05);
+    position: relative; overflow: hidden;
 }
-
 .price-card::before {
     content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle, rgba(49,130,206,0.08) 0%, transparent 60%);
+    position: absolute; top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(circle, rgba(14,165,233,0.06) 0%, transparent 50%);
     pointer-events: none;
 }
-
 .price-label {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: #63b3ed;
-    margin-bottom: 12px;
+    font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: #38bdf8; margin-bottom: 8px;
 }
-
 .price-value {
-    font-family: 'Syne', sans-serif;
-    font-size: 56px;
-    font-weight: 800;
-    color: #f7fafc;
-    letter-spacing: -0.03em;
-    line-height: 1;
-    margin: 16px 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 56px; font-weight: 900;
+    color: #f8fafc; letter-spacing: -0.04em;
+    line-height: 1; margin: 12px 0 8px;
 }
-
 .price-range {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 16px;
-    color: #a0aec0;
-    margin-top: 12px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px; color: #64748b; margin-top: 6px;
 }
 
-/* ── Info boxes ── */
+/* -- Info / Warning boxes -- */
 .info-box {
-    background: rgba(49,130,206,0.1);
-    border: 1px solid rgba(49,130,206,0.3);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin: 16px 0;
+    background: rgba(14,165,233,0.06);
+    border: 1px solid rgba(14,165,233,0.20);
+    border-left: 3px solid #0ea5e9;
+    border-radius: 10px; padding: 16px 20px; margin: 14px 0;
 }
-
-.info-box p { color: #bee3f8 !important; margin: 0; }
+.info-box p { color: #bae6fd !important; margin: 0; line-height: 1.7; font-size: 14px; }
 
 .warning-box {
-    background: rgba(214,158,46,0.1);
-    border: 1px solid rgba(214,158,46,0.4);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin: 16px 0;
+    background: rgba(245,158,11,0.06);
+    border: 1px solid rgba(245,158,11,0.22);
+    border-left: 3px solid #f59e0b;
+    border-radius: 10px; padding: 16px 20px; margin: 14px 0;
+}
+.warning-box p { color: #fde68a !important; margin: 0; line-height: 1.7; font-size: 14px; }
+
+/* -- Intro text above charts -- */
+.chart-intro {
+    font-size: 14.5px; color: #94a3b8; line-height: 1.7;
+    margin: 4px 0 16px; max-width: 900px;
 }
 
-.warning-box p { color: #fbd38d !important; margin: 0; }
-
-/* ── Metrics ── */
+/* -- Metric tiles -- */
 .metric-tile {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 16px;
-    padding: 24px 20px;
-    text-align: center;
+    background: linear-gradient(145deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 24px 16px; text-align: center;
 }
-
 .metric-tile .val {
-    font-family: 'Syne', sans-serif;
-    font-size: 36px;
-    font-weight: 800;
-    color: #63b3ed;
-    line-height: 1;
+    font-family: 'Inter', sans-serif;
+    font-size: 30px; font-weight: 800;
+    background: linear-gradient(135deg, #38bdf8, #818cf8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; line-height: 1;
 }
-
 .metric-tile .lbl {
-    font-size: 13px;
-    color: #718096;
-    margin-top: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: 11px; color: #475569; margin-top: 8px;
+    text-transform: uppercase; letter-spacing: 0.10em; font-weight: 500;
 }
 
-/* ── Form inputs ── */
-.stTextInput > div > div > input,
-.stSelectbox > div > div,
-.stSlider {
-    border-radius: 10px;
+/* -- Form inputs -- */
+.stSelectbox label, .stTextInput label, .stSlider label,
+.stNumberInput label {
+    color: #64748b !important; font-size: 12px !important;
+    font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em;
 }
 
-/* Fix label readability in forms */
-[data-testid="stForm"] label,
-.stSelectbox label,
-.stTextInput label,
-.stSlider label {
-    color: #a0aec0 !important;
-    font-size: 13px !important;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
+/* -- Section divider -- */
+hr { border-color: rgba(255,255,255,0.06) !important; margin: 32px 0; }
 
-/* ── Divider ── */
-hr {
-    border-color: rgba(255,255,255,0.08) !important;
-    margin: 32px 0;
-}
+/* -- Tables / DataFrames -- */
+.stDataFrame { border-radius: 12px; overflow: hidden; }
 
-/* ── Tables ── */
-.stDataFrame {
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-/* ── Link button ── */
+/* -- Otomoto CTA -- */
 .otomoto-btn {
     display: inline-block;
-    background: linear-gradient(135deg, #e53e3e, #c53030);
-    color: white !important;
-    text-decoration: none;
-    padding: 14px 32px;
-    border-radius: 12px;
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 15px;
-    margin-top: 16px;
-    transition: all 0.3s;
-    box-shadow: 0 4px 20px rgba(229,62,62,0.3);
-    letter-spacing: 0.02em;
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: white !important; text-decoration: none;
+    padding: 12px 26px; border-radius: 10px;
+    font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px;
+    margin-top: 12px; transition: all 0.25s;
+    box-shadow: 0 4px 16px rgba(220,38,38,0.25); letter-spacing: 0.02em;
 }
-
 .otomoto-btn:hover {
-    box-shadow: 0 8px 30px rgba(229,62,62,0.5);
-    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(220,38,38,0.40); transform: translateY(-2px);
 }
 
-/* ── Feature section on home ── */
-.feature-icon {
-    font-size: 40px;
-    margin-bottom: 12px;
-    display: block;
-}
-
-.feature-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    color: #f7fafc !important;
-    margin-bottom: 8px;
-}
-
-.feature-desc {
-    font-size: 14px;
-    color: #718096;
-    line-height: 1.6;
-}
-
-/* ── Hero section ── */
+/* -- Hero -- */
 .hero-badge {
     display: inline-block;
-    background: rgba(49,130,206,0.15);
-    border: 1px solid rgba(49,130,206,0.4);
-    border-radius: 100px;
-    padding: 6px 20px;
-    font-size: 13px;
-    color: #63b3ed;
-    font-weight: 500;
-    letter-spacing: 0.05em;
-    margin-bottom: 20px;
+    background: rgba(14,165,233,0.08);
+    border: 1px solid rgba(56,189,248,0.28);
+    border-radius: 100px; padding: 6px 20px;
+    font-size: 12px; color: #38bdf8; font-weight: 600;
+    letter-spacing: 0.06em; margin-bottom: 20px;
 }
 
-/* ── Card buttons (secondary) ── */
-[data-testid="stButton"][aria-label*="card_btn"] > button,
+/* -- Feature card -- */
+.feature-icon { font-size: 36px; margin-bottom: 10px; display: block; }
+.feature-title {
+    font-family: 'Inter', sans-serif; font-size: 16px; font-weight: 700;
+    color: #f1f5f9 !important; margin-bottom: 8px;
+}
+.feature-desc { font-size: 13.5px; color: #64748b; line-height: 1.65; }
+
+/* -- Card secondary buttons -- */
 div[data-testid="column"] .stButton > button {
-    background: rgba(49,130,206,0.12) !important;
-    border: 1px solid rgba(49,130,206,0.3) !important;
-    color: #63b3ed !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    padding: 10px 20px !important;
-    border-radius: 10px !important;
-    box-shadow: none !important;
-    letter-spacing: 0.04em;
-    margin-top: -8px;
+    background: rgba(14,165,233,0.08) !important;
+    border: 1px solid rgba(14,165,233,0.22) !important;
+    color: #38bdf8 !important; font-size: 13px !important;
+    font-weight: 600 !important; padding: 9px 18px !important;
+    border-radius: 10px !important; box-shadow: none !important;
+    letter-spacing: 0.02em; margin-top: -6px;
+}
+div[data-testid="column"] .stButton > button:hover {
+    background: rgba(14,165,233,0.18) !important;
+    border-color: #38bdf8 !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 14px rgba(14,165,233,0.15) !important;
 }
 
-div[data-testid="column"] .stButton > button:hover {
-    background: rgba(49,130,206,0.25) !important;
-    border-color: #63b3ed !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 16px rgba(49,130,206,0.2) !important;
+/* -- Section header -- */
+.section-header {
+    font-family: 'Inter', sans-serif;
+    font-size: 20px; font-weight: 700;
+    color: #e2e8f0 !important;
+    margin: 28px 0 12px; padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* -- Form section headings -- */
+.form-section-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px; font-weight: 700;
+    color: #7dd3fc !important; text-transform: uppercase;
+    letter-spacing: 0.08em; margin: 20px 0 14px;
+    padding: 10px 14px;
+    background: rgba(14,165,233,0.06); border-radius: 8px;
+    border-left: 3px solid #0ea5e9;
+}
+
+/* -- Business insight card -- */
+.biz-card {
+    background: linear-gradient(145deg, rgba(255,255,255,0.025), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px; padding: 24px; margin-bottom: 16px;
+    border-left: 3px solid #0ea5e9;
+}
+.biz-card h4 {
+    font-size: 16px !important; font-weight: 700 !important;
+    margin: 0 0 10px !important; color: #e2e8f0 !important;
+}
+.biz-card p { font-size: 14px; color: #94a3b8; line-height: 1.7; margin: 0; }
+.biz-card .highlight { color: #38bdf8; font-weight: 600; }
+
+/* -- Tabs -- */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 2px; background: rgba(255,255,255,0.02);
+    border-radius: 12px; padding: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 10px; padding: 8px 20px;
+    font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px;
 }
 
 #MainMenu, footer, header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Brand knowledge-base
+# ---------------------------------------------------------------------------
+
+BRAND_FREQUENCY_MAP: dict[str, int] = {
+    "volkswagen": 22000, "toyota": 15000, "audi": 14000, "bmw": 13500,
+    "mercedes-benz": 13000, "opel": 11000, "ford": 10500, "kia": 10000,
+    "hyundai": 9500, "renault": 9000, "peugeot": 8000, "skoda": 8000,
+    "seat": 7500, "honda": 6500, "volvo": 6000, "mazda": 5500,
+    "nissan": 5000, "mitsubishi": 4500, "fiat": 4000, "citroen": 3800,
+    "suzuki": 3500, "subaru": 3000, "land rover": 2500, "jeep": 2200,
+    "mini": 2000, "alfa romeo": 1800, "lexus": 1500, "infiniti": 800,
+    "dacia": 3000, "tesla": 1200, "porsche": 1000, "jaguar": 700,
+    "chevrolet": 600, "dodge": 300, "cadillac": 200, "bentley": 80,
+    "ferrari": 60, "lamborghini": 50, "rolls-royce": 40, "maserati": 90,
+    "mclaren": 30, "aston martin": 35, "lotus": 45, "maybach": 25,
+    "lada": 400, "trabant": 150, "polonez": 120, "syrena": 80,
+    "warszawa": 60, "wartburg": 70, "gaz": 55, "moskwicz": 65,
+}
+
+ULTRA_LUXURY_BRANDS = {
+    'ferrari', 'lamborghini', 'rolls-royce', 'bentley', 'mclaren',
+    'bugatti', 'koenigsegg', 'pagani', 'aston martin', 'maybach'
+}
+LUXURY_BRANDS = {
+    'mercedes-benz', 'bmw', 'audi', 'porsche', 'lexus', 'jaguar',
+    'maserati', 'tesla', 'land rover', 'infiniti', 'lincoln', 'genesis',
+    'cadillac', 'volvo'
+}
+PREMIUM_BRANDS = {
+    'alfa romeo', 'mini', 'saab', 'ds automobiles', 'cupra', 'alpine',
+    'lotus', 'subaru', 'acura', 'baic', 'ssangyong'
+}
+MASS_MARKET_BRANDS = {
+    'volkswagen', 'toyota', 'ford', 'hyundai', 'kia', 'honda',
+    'opel', 'chevrolet', 'peugeot', 'renault', 'seat', 'skoda',
+    'fiat', 'nissan', 'mazda', 'mitsubishi', 'suzuki', 'dacia',
+    'citroen', 'citroën', 'dodge', 'ram', 'jeep', 'chrysler',
+    'lancia', 'daewoo', 'lada'
+}
+ALL_PREMIUM_SET = ULTRA_LUXURY_BRANDS | LUXURY_BRANDS | PREMIUM_BRANDS
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def get_brand_tier(brand: str) -> str:
+    b = brand.strip().lower()
+    if b in ULTRA_LUXURY_BRANDS: return "Ultra_Luxury"
+    if b in LUXURY_BRANDS:       return "Luxury"
+    if b in PREMIUM_BRANDS:      return "Premium"
+    if b in MASS_MARKET_BRANDS:  return "Mass_Market"
+    return "Niche"
+
+
+def get_age_category(age: float) -> str:
+    if age < 3:  return "New"
+    if age < 9:  return "Recent"
+    if age < 17: return "Used"
+    return "Old"
+
+
+def get_performance_category(hp_per_liter: float) -> str:
+    if pd.isna(hp_per_liter): return "Unknown"
+    if hp_per_liter < 60:     return "Economy"
+    if hp_per_liter < 100:    return "Standard"
+    if hp_per_liter < 150:    return "Performance"
+    return "High_Performance"
+
+
+def get_usage_category(mileage_per_year: float) -> str:
+    if pd.isna(mileage_per_year): return "Unknown"
+    if mileage_per_year < 10000:  return "Low"
+    if mileage_per_year < 20000:  return "Average"
+    if mileage_per_year < 30000:  return "High"
+    return "Very_High"
+
+
+def generate_otomoto_link(brand, model, year, price_min, price_max):
+    base_url = "https://www.otomoto.pl/osobowe"
+    brand_clean = brand.lower().replace(' ', '-').replace('o\u0308', 'o').replace('e\u0301', 'e')
+    model_clean = model.lower().replace(' ', '-') if model else ""
+    params = {
+        'search[filter_enum_make]': brand,
+        'search[filter_float_year:from]': max(year - 1, 1915),
+        'search[filter_float_year:to]': min(year + 1, CURRENT_YEAR),
+        'search[filter_float_price:from]': int(price_min * 0.89),
+        'search[filter_float_price:to]': int(price_max * 1.10),
+    }
+    if model_clean:
+        return f"{base_url}/{brand_clean}/{model_clean}?{urlencode(params)}"
+    return f"{base_url}/{brand_clean}?{urlencode(params)}"
+
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
+
+def prepare_input_data(user_inputs: dict) -> pd.DataFrame:
+    df = pd.DataFrame([user_inputs])
+
+    brand_lower = df["Vehicle_brand"].iloc[0].strip().lower()
+    model_lower = df["Vehicle_model"].iloc[0].strip().lower()
+
+    df["Vehicle_age"] = CURRENT_YEAR - df["Production_year"].astype(int)
+    age = int(df["Vehicle_age"].iloc[0])
+
+    feat_str = df["Features"].iloc[0]
+    feat_list = [f.strip() for f in str(feat_str).split(",") if f.strip()] if feat_str else []
+    df["Num_features"] = len(feat_list)
+    df["Features"] = str(feat_list)
+
+    df["Age_category"] = get_age_category(age)
+    df["Is_new_car"] = int(age < 3)
+    df["Is_old_car"] = int(age > 16)
+
+    mileage = float(df["Mileage_km"].iloc[0])
+    power   = float(df["Power_HP"].iloc[0])
+    disp    = float(df["Displacement_cm3"].iloc[0])
+
+    mileage_per_year = mileage / max(age, 1)
+    df["Mileage_per_year"] = mileage_per_year
+    df["Usage_intensity"]  = get_usage_category(mileage_per_year)
+
+    disp_safe = max(disp, 100.0)
+    hp_per_liter = power / (disp_safe / 1000.0)
+    df["HP_per_liter"]         = hp_per_liter
+    df["Performance_category"] = get_performance_category(hp_per_liter)
+
+    is_premium  = int(brand_lower in ALL_PREMIUM_SET)
+    is_supercar = int(power > 500 and is_premium)
+    is_collector = int(age > 25)
+
+    df["Is_premium"]   = is_premium
+    df["Is_supercar"]  = is_supercar
+    df["Is_collector"] = is_collector
+
+    df["Listing_year"] = CURRENT_YEAR
+
+    df["Mileage_km_log"]       = np.log1p(max(mileage, 0))
+    df["Power_HP_log"]         = np.log1p(max(power, 0))
+    df["Displacement_cm3_log"] = np.log1p(max(disp, 0))
+
+    df["Vehicle_age_squared"]  = age ** 2
+    df["Power_HP_squared"]     = power ** 2
+    df["Mileage_km_squared"]   = mileage ** 2
+
+    df["Age_Mileage_interaction"]  = age * mileage
+    df["Power_Age_interaction"]    = power * age
+    df["Mileage_per_year_Age"]     = mileage_per_year * age
+
+    brand_freq = BRAND_FREQUENCY_MAP.get(brand_lower, 500)
+    brandmodel_freq = max(brand_freq // 5, 10)
+
+    max_freq = 22000.0
+    raw_rarity = np.log1p(max_freq / max(brand_freq, 1))
+    max_rarity = np.log1p(max_freq / 1.0)
+    rarity_index = min(raw_rarity / max_rarity, 1.0)
+
+    df["Brand_tier"]           = get_brand_tier(df["Vehicle_brand"].iloc[0])
+    df["Brand_frequency"]      = brand_freq
+    df["Rarity_index"]         = round(rarity_index, 4)
+    df["BrandModel_frequency"] = brandmodel_freq
+
+    if brand_freq <= 5:     pop = "Ultra_Rare"
+    elif brand_freq <= 20:  pop = "Rare"
+    elif brand_freq <= 100: pop = "Uncommon"
+    elif brand_freq <= 500: pop = "Common"
+    else:                   pop = "Popular"
+    df["Brand_popularity"] = pop
+
+    df = df.drop(columns=["Production_year", "Drive"], errors="ignore")
+
+    expected_columns = [
+        "Condition", "Vehicle_brand", "Vehicle_model",
+        "Mileage_km", "Power_HP", "Displacement_cm3",
+        "Fuel_type", "Transmission", "Doors_number", "Colour",
+        "Origin_country", "First_owner", "Offer_location", "Features",
+        "Vehicle_age", "Num_features", "Age_category",
+        "Is_new_car", "Is_old_car",
+        "Mileage_per_year", "Usage_intensity", "HP_per_liter",
+        "Performance_category", "Is_premium", "Is_supercar", "Is_collector",
+        "Listing_year",
+        "Mileage_km_log", "Power_HP_log", "Displacement_cm3_log",
+        "Vehicle_age_squared", "Power_HP_squared", "Mileage_km_squared",
+        "Age_Mileage_interaction", "Power_Age_interaction",
+        "Mileage_per_year_Age",
+        "Brand_tier", "Brand_frequency", "Rarity_index",
+        "BrandModel_frequency", "Brand_popularity",
+    ]
+
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = 0
+
+    return df[expected_columns]
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
 
 @st.cache_resource
 def load_model():
@@ -324,283 +505,203 @@ def load_model():
         )
         return joblib.load(model_path)
     except Exception as e:
-        st.error(f"Model was not loaded: {e}")
+        st.error(f"Model could not be loaded: {e}")
         return None
+
 
 @st.cache_data
 def load_sample_data():
     np.random.seed(42)
     cities = [
-        'Warszawa', 'Kraków', 'Wrocław', 'Poznań', 'Gdańsk',
-        'Szczecin', 'Bydgoszcz', 'Lublin', 'Katowice', 'Białystok',
-        'Gdynia', 'Częstochowa', 'Radom', 'Sosnowiec', 'Toruń',
-        'Kielce', 'Gliwice', 'Zabrze', 'Bytom', 'Olsztyn',
-        'Łódź', 'Rzeszów', 'Zielona Góra', 'Opole', 'Gorzów Wielkopolski',
-        'Bielsko-Biała', 'Płock', 'Legnica', 'Tarnów', 'Chorzów'
+        "Warszawa", "Krakow", "Wroclaw", "Poznan", "Gdansk",
+        "Szczecin", "Bydgoszcz", "Lublin", "Katowice", "Bialystok",
+        "Gdynia", "Czestochowa", "Radom", "Sosnowiec", "Torun",
+        "Kielce", "Gliwice", "Zabrze", "Bytom", "Olsztyn",
+        "Lodz", "Rzeszow", "Zielona Gora", "Opole", "Gorzow Wielkopolski",
+        "Bielsko-Biala", "Plock", "Legnica", "Tarnow", "Chorzow"
     ]
-
     city_coords = {
-        'Warszawa': (52.2297, 21.0122), 'Kraków': (50.0647, 19.9450),
-        'Wrocław': (51.1079, 17.0385), 'Poznań': (52.4064, 16.9252),
-        'Gdańsk': (54.3520, 18.6466), 'Szczecin': (53.4285, 14.5528),
-        'Bydgoszcz': (53.1235, 18.0084), 'Lublin': (51.2465, 22.5684),
-        'Katowice': (50.2649, 19.0238), 'Białystok': (53.1325, 23.1688),
-        'Gdynia': (54.5189, 18.5305), 'Częstochowa': (50.8118, 19.1203),
-        'Radom': (51.4027, 21.1471), 'Sosnowiec': (50.2862, 19.1040),
-        'Toruń': (53.0138, 18.5984), 'Kielce': (50.8661, 20.6286),
-        'Gliwice': (50.2945, 18.6714), 'Zabrze': (50.3249, 18.7856),
-        'Bytom': (50.3483, 18.9160), 'Olsztyn': (53.7784, 20.4801),
-        'Łódź': (51.7592, 19.4560), 'Rzeszów': (50.0413, 22.0010),
-        'Zielona Góra': (51.9356, 15.5062), 'Opole': (50.6669, 17.9231),
-        'Gorzów Wielkopolski': (52.7311, 15.2287), 'Bielsko-Biała': (49.8225, 19.0468),
-        'Płock': (52.5464, 19.7065), 'Legnica': (51.2070, 16.1553),
-        'Tarnów': (50.0121, 20.9858), 'Chorzów': (50.2975, 18.9448)
+        "Warszawa": (52.2297, 21.0122), "Krakow": (50.0647, 19.9450),
+        "Wroclaw": (51.1079, 17.0385), "Poznan": (52.4064, 16.9252),
+        "Gdansk": (54.3520, 18.6466), "Szczecin": (53.4285, 14.5528),
+        "Bydgoszcz": (53.1235, 18.0084), "Lublin": (51.2465, 22.5684),
+        "Katowice": (50.2649, 19.0238), "Bialystok": (53.1325, 23.1688),
+        "Gdynia": (54.5189, 18.5305), "Czestochowa": (50.8118, 19.1203),
+        "Radom": (51.4027, 21.1471), "Sosnowiec": (50.2862, 19.1040),
+        "Torun": (53.0138, 18.5984), "Kielce": (50.8661, 20.6286),
+        "Gliwice": (50.2945, 18.6714), "Zabrze": (50.3249, 18.7856),
+        "Bytom": (50.3483, 18.9160), "Olsztyn": (53.7784, 20.4801),
+        "Lodz": (51.7592, 19.4560), "Rzeszow": (50.0413, 22.0010),
+        "Zielona Gora": (51.9356, 15.5062), "Opole": (50.6669, 17.9231),
+        "Gorzow Wielkopolski": (52.7311, 15.2287), "Bielsko-Biala": (49.8225, 19.0468),
+        "Plock": (52.5464, 19.7065), "Legnica": (51.2070, 16.1553),
+        "Tarnow": (50.0121, 20.9858), "Chorzow": (50.2975, 18.9448)
     }
-
     city_sales = {city: np.random.randint(500, 5000) for city in cities}
     return city_sales, city_coords
 
-def get_brand_reliability_category(brand):
-    brand_lower = str(brand).lower()
-    luxury = ['ferrari', 'lamborghini', 'rolls-royce', 'bentley', 'aston martin',
-              'mclaren', 'maserati', 'porsche']
-    american = ['ram', 'dodge', 'chevrolet', 'hummer', 'cadillac']
-    vintage = ['syrena', 'nysa', 'warszawa', 'polonez', 'żuk', 'gaz', 'moskwicz',
-               'lada', 'wartburg', 'trabant', 'tata']
-    premium_asian = ['infiniti', 'acura', 'baic', 'ssangyong']
-    budget = ['dacia', 'fiat', 'daewoo', 'lancia']
 
-    if brand_lower in luxury: return 'Luxury'
-    if brand_lower in american: return 'American'
-    if brand_lower in vintage: return 'Vintage'
-    if brand_lower in premium_asian: return 'Premium_Asian'
-    if brand_lower in budget: return 'Budget'
-    return 'Standard'
-
-def generate_otomoto_link(brand, model, year, price_min, price_max):
-    base_url = "https://www.otomoto.pl/osobowe"
-    brand_clean = brand.lower().replace(' ', '-').replace('ö', 'o').replace('é', 'e')
-    model_clean = model.lower().replace(' ', '-') if model else ""
-
-    year_offset = 2026 - 2021
-    adjusted_year = year + year_offset
-
-    params = {
-        'search[filter_enum_make]': brand,
-        'search[filter_float_year:from]': max(adjusted_year - 1, 1915),
-        'search[filter_float_year:to]': min(adjusted_year + 1, 2026),
-        'search[filter_float_price:from]': int(price_min * 0.89),
-        'search[filter_float_price:to]': int(price_max * 1.10),
-    }
-    if model_clean:
-        return f"{base_url}/{brand_clean}/{model_clean}?{urlencode(params)}"
-    return f"{base_url}/{brand_clean}?{urlencode(params)}"
-
-def prepare_input_data(user_inputs):
-    df = pd.DataFrame([user_inputs])
-    current_year = 2021
-    df['Vehicle_age'] = current_year - df['Production_year']
-
-    if isinstance(df['Features'].iloc[0], str):
-        feat_list = [f.strip() for f in df['Features'].iloc[0].split(',') if f.strip()]
-        df['Features'] = [feat_list]
-
-    df['Num_features'] = df['Features'].apply(lambda x: len(x) if isinstance(x, list) else 0)
-    df['Age_category'] = pd.cut(df['Vehicle_age'], bins=[-1, 3, 10, 20, 100],
-                                labels=['New', 'Standard', 'Old', 'Vintage'])
-    df['Is_new_car'] = (df['Vehicle_age'] <= 1).astype(int)
-    df['Is_old_car'] = (df['Vehicle_age'] > 20).astype(int)
-    df['Mileage_per_year'] = df['Mileage_km'] / (df['Vehicle_age'] + 1)
-    df['Usage_intensity'] = df['Mileage_km'] / (df['Vehicle_age'] + 1)
-    df['HP_per_liter'] = df['Power_HP'] / (df['Displacement_cm3'] / 1000 + 0.1)
-    df['Performance_category'] = pd.cut(df['Power_HP'], bins=[-1, 100, 200, 400, 2000],
-                                        labels=['Economy', 'Standard', 'Sport', 'Supercar'])
-    df['Brand_category'] = get_brand_reliability_category(df['Vehicle_brand'].iloc[0])
-    df['Is_premium'] = df['Brand_category'].isin(['Luxury', 'Premium_Asian']).astype(int)
-    df['Is_supercar'] = ((df['Power_HP'] > 500) | (df['Brand_category'] == 'Luxury')).astype(int)
-    df['is_collector'] = ((df['Vehicle_age'] > 30) | (df['Brand_category'] == 'Luxury')).astype(int)
-    df['Mileage_km_log'] = np.log1p(df['Mileage_km'])
-    df['Power_HP_log'] = np.log1p(df['Power_HP'])
-    df['Displacement_cm3_log'] = np.log1p(df['Displacement_cm3'])
-    df['Vehicle_age_squared'] = df['Vehicle_age'] ** 2
-    df['Power_HP_squared'] = df['Power_HP'] ** 2
-    df['Mileage_km_squared'] = df['Mileage_km'] ** 2
-    df['Age_Mileage_interaction'] = df['Vehicle_age'] * df['Mileage_km']
-    df['Power_Age_interaction'] = df['Power_HP'] * df['Vehicle_age']
-    df['Mileage_per_year_Age'] = df['Mileage_per_year'] * df['Vehicle_age']
-    df['Brand_frequency'] = 100
-    df['Brand_popularity'] = 'Common'
-
-    expected_columns = [
-        'Condition', 'Vehicle_brand', 'Vehicle_model', 'Mileage_km', 'Power_HP',
-        'Displacement_cm3', 'Fuel_type', 'Drive', 'Transmission', 'Type',
-        'Doors_number', 'Colour', 'Origin_country', 'First_owner',
-        'Offer_location', 'Features', 'Vehicle_age', 'Num_features',
-        'Age_category', 'Is_new_car', 'Is_old_car', 'Mileage_per_year',
-        'Usage_intensity', 'HP_per_liter', 'Performance_category', 'Is_premium',
-        'Is_supercar', 'is_collector', 'Mileage_km_log', 'Power_HP_log',
-        'Displacement_cm3_log', 'Vehicle_age_squared', 'Power_HP_squared',
-        'Mileage_km_squared', 'Age_Mileage_interaction',
-        'Power_Age_interaction', 'Mileage_per_year_Age', 'Brand_category',
-        'Brand_frequency', 'Brand_popularity'
-    ]
-    return df[expected_columns]
+# ---------------------------------------------------------------------------
+# Load model
+# ---------------------------------------------------------------------------
 
 model_data = load_model()
 if model_data:
-    pipeline = model_data['model_pipeline'] if isinstance(model_data, dict) else model_data
+    pipeline = (
+        model_data["model_pipeline"]
+        if isinstance(model_data, dict)
+        else model_data
+    )
 else:
-    st.error("⚠️ Model cannot be loaded, check your connection.")
+    st.error("Model cannot be loaded. Check your internet connection.")
     st.stop()
 
-if 'page' not in st.session_state:
-    st.session_state.page = 'home'
 
-def navigate_to(page):
+# ---------------------------------------------------------------------------
+# Navigation state
+# ---------------------------------------------------------------------------
+
+if "page" not in st.session_state:
+    st.session_state.page = "home"
+
+
+def navigate_to(page: str) -> None:
     st.session_state.page = page
     st.rerun()
 
+
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+
 with st.sidebar:
-    st.markdown("""
+    st.markdown(f"""
     <div style='padding: 24px 8px 20px; text-align: center;'>
-        <div style='font-family: Syne, sans-serif; font-size: 22px; font-weight: 800; color: #f7fafc; letter-spacing: -0.02em;'>
-            🚗 CarVal PL
+        <div style='font-size: 28px; margin-bottom: 4px;'>
+            <span style='background: linear-gradient(135deg, #38bdf8, #818cf8);
+                         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                         font-weight: 900; font-size: 24px; font-family: Inter, sans-serif;'>
+                CarVal PL
+            </span>
         </div>
-        <div style='font-size: 12px; color: #4a5568; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.1em;'>
-            Poland Market 2026
+        <div style='font-size: 10px; color: #334155; margin-top: 4px;
+                    text-transform: uppercase; letter-spacing: 0.14em; font-weight: 500;'>
+            Poland Market &middot; {CURRENT_YEAR}
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    pages = [
-        ("🏠", "Home", "home"),
-        ("🔮", "Price Prediction", "predict"),
-        ("🗺️", "Regional Market", "regional"),
-        ("📊", "Visualizations", "visualizations"),
-        ("🧠", "About Model", "info"),
+    nav_items = [
+        ("Home",             "home"),
+        ("Price Prediction", "predict"),
+        ("Regional Market",  "regional"),
+        ("Visualizations",   "visualizations"),
+        ("About Model",      "info"),
     ]
 
-    for icon, label, key in pages:
+    for label, key in nav_items:
         btn_type = "primary" if st.session_state.page == key else "secondary"
-        if st.button(f"{icon}  {label}", use_container_width=True, type=btn_type, key=f"nav_{key}"):
+        if st.button(f"  {label}", use_container_width=True,
+                     type=btn_type, key=f"nav_{key}"):
             navigate_to(key)
 
-    st.markdown("<hr style='border-color: rgba(255,255,255,0.06); margin: 24px 0;'>", unsafe_allow_html=True)
+    st.markdown(
+        "<hr style='border-color: rgba(255,255,255,0.04); margin: 20px 0;'>",
+        unsafe_allow_html=True
+    )
     st.markdown("""
     <div style='text-align: center; padding: 0 8px;'>
-        <p style='font-size: 11px; color: #2d3748; line-height: 1.8; margin: 0;'>
-            XGBoost · scikit-learn<br>200,000+ listings · R² 92.4%
+        <p style='font-size: 10px; color: #1e293b; line-height: 2; margin: 0; font-weight: 500;'>
+            XGBoost &middot; scikit-learn<br>
+            200 000+ listings &middot; R&sup2; 93.0%<br>
+            <span style='color:#1e293b;'>Przemsonn/poland-car-price-model</span>
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-[data-testid="collapsedControl"] { display: none !important; }
 
-#sb-toggle {
-    position: fixed;
-    top: 14px;
-    left: 14px;
-    z-index: 999999;
-    background: rgba(49,130,206,0.85);
-    border: 1px solid rgba(99,179,237,0.5);
-    color: white;
-    border-radius: 8px;
-    width: 38px;
-    height: 38px;
-    font-size: 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(8px);
-    transition: background 0.2s;
-    font-family: sans-serif;
-    line-height: 1;
-}
-#sb-toggle:hover { background: rgba(49,130,206,1); }
-</style>
+# ---------------------------------------------------------------------------
+# Helpers for charts
+# ---------------------------------------------------------------------------
 
-<script>
-(function tryInit() {
-    const doc = window.parent.document;
+PLOT_BG = dict(
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font_color="#94a3b8",
+    title_font_size=16,
+    title_font_family="Inter",
+    margin=dict(t=48, b=32, l=16, r=16)
+)
 
-    // Usuń stary przycisk jeśli istnieje (przy rerun)
-    const old = doc.getElementById('sb-toggle');
-    if (old) old.remove();
 
-    // Stwórz nowy przycisk bezpośrednio w parent body
-    const btn = doc.createElement('button');
-    btn.id = 'sb-toggle';
-    btn.innerHTML = '☰';
-    btn.title = 'Toggle menu';
+def _section(title: str) -> None:
+    st.markdown(f"<div class='section-header'>{title}</div>", unsafe_allow_html=True)
 
-    // Skopiuj style z <style> powyżej
-    btn.style.cssText = `
-        position: fixed; top: 14px; left: 14px; z-index: 999999;
-        background: rgba(49,130,206,0.85);
-        border: 1px solid rgba(99,179,237,0.5);
-        color: white; border-radius: 8px;
-        width: 38px; height: 38px; font-size: 18px;
-        cursor: pointer; display: flex;
-        align-items: center; justify-content: center;
-        backdrop-filter: blur(8px); transition: background 0.2s;
-        font-family: sans-serif;
-    `;
 
-    let hidden = false;
+def _intro(text: str) -> None:
+    st.markdown(f"<p class='chart-intro'>{text}</p>", unsafe_allow_html=True)
 
-    btn.addEventListener('click', function () {
-        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-        if (!sidebar) return;
 
-        hidden = !hidden;
-        sidebar.style.transition = 'all 0.3s ease';
-        sidebar.style.display = hidden ? 'none' : '';
-        btn.innerHTML = hidden ? '▶' : '☰';
-        btn.title = hidden ? 'Show menu' : 'Hide menu';
-    });
+def _insight(text: str) -> None:
+    st.markdown(
+        f"<div class='info-box'><p>{text}</p></div>",
+        unsafe_allow_html=True
+    )
 
-    doc.body.appendChild(btn);
-})();
-</script>
-""", unsafe_allow_html=True)
 
-def home_page():
-    st.markdown("""
-    <div style='padding: 60px 0 40px; text-align: center;'>
-        <div class='hero-badge'>🇵🇱 Polish Automotive Market · 2026</div>
-        <h1 style='font-size: 64px; font-weight: 800; color: #f7fafc !important;
+def _show_image(path: str) -> None:
+    _, img_col, _ = st.columns([0.3, 3.4, 0.3])
+    with img_col:
+        st.image(path, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE: Home
+# ═══════════════════════════════════════════════════════════════════════════
+
+def home_page() -> None:
+    st.markdown(f"""
+    <div style='padding: 56px 0 40px; text-align: center;'>
+        <div class='hero-badge'>Polish Automotive Market &middot; {CURRENT_YEAR}</div>
+        <h1 style='font-size: 60px; font-weight: 900; color: #f1f5f9 !important;
                    letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 20px;'>
-            What is your car<br>worth?
+            What is your car<br>worth today?
         </h1>
-        <p style='font-size: 20px; color: #718096; max-width: 520px;
-                  margin: 0 auto; line-height: 1.6;'>
-            Artificial intelligence will value your car based on
-            200,000+ listings from the Polish market.
+        <p style='font-size: 18px; color: #64748b; max-width: 520px;
+                  margin: 0 auto; line-height: 1.7;'>
+            AI-powered valuation trained on 200 000+ real listings
+            from the Polish used-car market. Instant, transparent, data-driven.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    col_cta, col_cta2, col_cta3 = st.columns([1, 1.5, 1])
-    with col_cta2:
-        if st.button("🔮  Get your car valuation now", use_container_width=True):
-            navigate_to('predict')
+    _, cta_col, _ = st.columns([1, 1.6, 1])
+    with cta_col:
+        if st.button("Get your car valuation now", use_container_width=True):
+            navigate_to("predict")
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
+    # Feature cards
     c1, c2, c3 = st.columns(3)
-    features_data = [
-        ("🔮", "Instant Valuation", "Enter your car's details and get an instant market value.", "predict", "Value my car"),
-        ("🗺️", "Regional Analysis", "Explore how prices differ between cities across Poland.", "regional", "View map"),
-        ("📊", "Data & Charts", "Interactive visualizations from the analysis of 200,000+ listings.", "visualizations", "Browse charts"),
+    cards = [
+        ("Instant Valuation",
+         "Enter your car's details and receive a market estimate in seconds, "
+         "powered by a gradient-boosting model trained on real transaction data.",
+         "predict", "Value my car"),
+        ("Regional Analysis",
+         "Explore how prices differ between cities and regions across Poland. "
+         "See where premium brands concentrate and which areas are most active.",
+         "regional", "View map"),
+        ("Data & Charts",
+         "Interactive visualizations covering price distributions, depreciation "
+         "curves, fuel trends, brand rankings, and model diagnostics.",
+         "visualizations", "Browse charts"),
     ]
-    for col, (icon, title, desc, target, btn_label) in zip([c1, c2, c3], features_data):
+    for col, (title, desc, target, btn_label) in zip([c1, c2, c3], cards):
         with col:
             st.markdown(f"""
-            <div class='glass-card' style='text-align: center;'>
-                <span class='feature-icon'>{icon}</span>
+            <div class='glass-card' style='text-align: center; min-height: 190px;'>
                 <div class='feature-title'>{title}</div>
                 <div class='feature-desc'>{desc}</div>
             </div>
@@ -610,118 +711,165 @@ def home_page():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
+    # Model performance summary
+    st.markdown(
+        "<h2 style='text-align: center; margin-bottom: 24px;'>Model Performance</h2>",
+        unsafe_allow_html=True
+    )
+    m1, m2, m3, m4 = st.columns(4)
+    metrics = [
+        ("93.0%", "R&sup2; Score"),
+        ("35 170 PLN", "RMSE"),
+        ("11 900 PLN", "MAE"),
+        ("18.6%", "MAPE"),
+    ]
+    for col, (val, lbl) in zip([m1, m2, m3, m4], metrics):
+        with col:
+            st.markdown(f"""
+            <div class='metric-tile'>
+                <div class='val'>{val}</div>
+                <div class='lbl'>{lbl}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("""
-    <h2 style='text-align: center; margin-bottom: 32px;'>Model Performance</h2>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div style="max-width:900px;margin:auto;text-align:center;font-size:18px;line-height:1.6;">
-
-    The initial XGBoost model improved prediction performance compared to the previously 
-    tested models, slightly increasing all evaluation metrics. Most predicted values are 
-    close to the actual car prices, indicating strong overall accuracy. However, the model 
-    still produced several extreme outliers, with errors reaching up to 1.5 million PLN.
-
-    Further analysis showed that these large errors mainly occur for very old vehicles 
-    (before 1980) and modern luxury or supercars. These segments are difficult to 
-    because they are rare in the dataset, which limits the model’s ability to learn 
-    pricing patterns.
-
-    After applying hyperparameter tuning and additional feature engineering, the tuned 
-    XGBoost model did not significantly improve the metrics. The R² score decreased by 
-    about 1.5%, while MAPE increased by around 0.4%, and RMSE and MAE rose slightly. 
-
-    Analysis of MAPE by brand showed that the impact of feature engineering varied across 
-    manufacturers. Prediction errors decreased for some brands but increased slightly for 
-    others, suggesting that the new features captured certain brand-specific 
-    pricing relationships.
-
-    Overall, both XGBoost models demonstrate strong predictive performance, with an average 
-    absolute error of around 7,900–8,100 PLN. Considering that car prices in the dataset 
-    range from tens of thousands to several million PLN, this level of error remains relatively small.
+    <div style='max-width: 860px; margin: 0 auto; text-align: center;
+                font-size: 15px; line-height: 1.75; color: #64748b;'>
+        The XGBoost model explains approximately <b style='color:#38bdf8;'>93%</b> of the
+        variance in used-car prices on the Polish market. Most predictions fall within
+        &plusmn;19% of the actual transaction price, with an average absolute error of
+        around <b style='color:#38bdf8;'>11 900 PLN</b>. Performance is strongest for
+        mass-market vehicles (2010-2024, economy-premium segment) and intentionally
+        lower for vintage or exotic cars with very few comparable listings.
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
-    st.markdown("""
-    <h2 style='text-align: center; margin-bottom: 24px;'>About the Project</h2>
-
-    <div style="max-width:900px;margin:auto;text-align:center;font-size:18px;line-height:1.6;">
-
-    <p>
-    <b style='color: #f7fafc;'>Car Price Prediction</b> is a machine learning project designed to estimate 
-    used car prices on the Polish automotive market. The model analyzes historical listing data and 
-    predicts vehicle values with an accuracy of approximately 
-    <b style='color: #63b3ed;'>R² = 94.3%</b>.
-    </p>
-
-    <p>
-    The final solution is based on the <b style='color: #f7fafc;'>XGBoost regression model</b>, which 
-    outperformed other tested approaches such as Linear Regression and Random Forest. 
-    The model was trained on a dataset containing more than <b style='color: #f7fafc;'>200,000 car listings</b> 
-    and utilizes <b style='color: #f7fafc;'>over 30 engineered features</b> derived from vehicle specifications, 
-    market attributes, and statistical feature interactions.
-    </p>
-
-    <p>
-    Feature engineering incorporated both domain knowledge and data-driven transformations, 
-    allowing the model to better capture relationships between factors such as vehicle age, mileage, 
-    engine performance, and brand reputation. These variables are among the most influential drivers 
-    of vehicle price in the used car market.
-    </p>
-
-    <p>
-    The model achieves strong predictive performance across most market segments, with relatively 
-    low average prediction error considering the wide price range present in the dataset.
-    </p>
-
-    <div class='warning-box' style='margin-top: 20px;'>
-    <p>
-    ⚠️ <b>Important:</b> The model performs best for mass-market vehicles (economy, standard, and premium segments). 
-    Prediction accuracy may be lower for <b>luxury vehicles, rare models, vintage cars, and supercars</b>, 
-    as these segments are less represented in the training data and often follow different pricing dynamics.
-    </p>
-    </div>
-
-    </div>
-    """, unsafe_allow_html=True)
-
-def predict_page():
-    st.markdown("""
-    <h1 style='margin-bottom: 8px;'>🔮 Vehicle Valuation</h1>
-    <p style='color: #718096; margin-bottom: 16px; font-size: 16px;'>
-        Fill in the form — fields marked with * are required.
-    </p>
-    <div class='warning-box' style='margin-bottom: 28px;'>
-        <p>⚠️ <b>Data limitation:</b> The model was trained on listings up to <b>2021</b>.
-        For vehicles from that period, an <b>inflation adjustment</b> is applied automatically
-        to reflect current market prices. Predictions for post-2021 models may be less accurate
-        as those vehicles were not present in the training data. For educational project I set
-        2021 as a maximum production year of a car we want to predict.</p>
+    # About project (expanded)
+    st.markdown(
+        "<h2 style='text-align: center; margin-bottom: 24px;'>About the Project</h2>",
+        unsafe_allow_html=True
+    )
+    st.markdown(f"""
+    <div style='max-width: 880px; margin: 0 auto; font-size: 15px; line-height: 1.8;
+                color: #64748b;'>
+        <p>
+            <b style='color: #e2e8f0;'>Car Price Prediction Poland</b> is an end-to-end
+            machine-learning project designed to estimate used-car prices on the Polish
+            automotive market. The model was trained on data collected directly from
+            <b style='color: #e2e8f0;'>Otomoto</b> - Poland's largest car-listing
+            platform - and achieves an accuracy of approximately
+            <b style='color: #38bdf8;'>R&sup2; = 93.0%</b>.
+        </p>
+        <p>
+            The project covers the <b style='color: #e2e8f0;'>complete data science
+            lifecycle</b>: automated web scraping with stratified sampling across market
+            segments, thorough data cleaning and validation, extensive exploratory data
+            analysis, domain-driven feature engineering (41 features derived from 14 raw
+            inputs), systematic model selection with cross-validation, Bayesian
+            hyperparameter optimisation via Optuna, and production deployment as a
+            containerised Streamlit application with a model hosted on Hugging Face Hub.
+        </p>
+        <p>
+            Four model architectures were evaluated during development:
+            <b style='color: #e2e8f0;'>Ridge Regression</b> (R&sup2; 72.4%) served as
+            a linear baseline; <b style='color: #e2e8f0;'>Random Forest</b> (R&sup2; 92.2%)
+            demonstrated the power of ensemble methods;
+            <b style='color: #e2e8f0;'>XGBoost Base</b> (R&sup2; 93.0%) was selected as
+            the production model for its best overall test-set performance; and
+            <b style='color: #e2e8f0;'>XGBoost Weighted</b> (R&sup2; 92.0%) explored
+            sample weighting to improve predictions on rare luxury segments.
+        </p>
+        <p>
+            The feature engineering pipeline creates 27 derived features including
+            depreciation proxies (vehicle age, age-squared), usage intensity metrics
+            (mileage per year), performance ratios (HP per litre), brand-level market
+            features (tier classification, rarity index, popularity bins), and
+            interaction terms that capture non-linear relationships between age,
+            mileage, and engine power. These features were designed using domain
+            knowledge of the automotive market and validated through SHAP-based
+            explainability analysis.
+        </p>
+        <p>
+            The dataset of <b style='color: #e2e8f0;'>200 000+ listings</b> was
+            collected using a custom stratified scraper that ensures balanced
+            representation across popular brands, luxury marques, and electric vehicles.
+            All prices reflect the {CURRENT_YEAR - 2}-{CURRENT_YEAR} Polish market
+            to avoid mixing incompatible price regimes from different economic periods.
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("← Back"): navigate_to("home")
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Tech stack cards
+    t1, t2, t3 = st.columns(3)
+    tech_cards = [
+        ("Machine Learning",
+         "XGBoost 2.0 with Optuna Bayesian optimisation (50+ trials), "
+         "scikit-learn pipelines, category-encoders for high-cardinality features."),
+        ("Data Pipeline",
+         "Custom Otomoto scraper with stratified sampling, Pandas for ETL, "
+         "NumPy for numerical transformations. 200 000+ listings processed."),
+        ("Deployment",
+         "Streamlit web application, Docker containerisation, "
+         "Hugging Face Hub for model hosting, Plotly & Folium for visualisations."),
+    ]
+    for col, (title, desc) in zip([t1, t2, t3], tech_cards):
+        with col:
+            st.markdown(f"""
+            <div class='glass-card' style='min-height: 140px;'>
+                <div class='feature-title'>{title}</div>
+                <div class='feature-desc'>{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class='warning-box' style='max-width: 880px; margin: 20px auto 0;'>
+        <p><b>Important:</b> The model performs best for mass-market vehicles
+        (economy, standard, and premium segments, 2010-2024). Accuracy may be lower for
+        <b>luxury vehicles, rare models, vintage cars, and supercars</b> due to
+        limited training data for those segments.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE: Price Prediction
+# ═══════════════════════════════════════════════════════════════════════════
+
+def predict_page() -> None:
+    st.markdown("""
+    <h1 style='margin-bottom: 6px;'>Vehicle Valuation</h1>
+    <p style='color: #64748b; margin-bottom: 20px; font-size: 15px;'>
+        Fill in the form below - fields marked with <b style='color:#f87171;'>*</b>
+        are required for an accurate estimate.
+    </p>
+    """, unsafe_allow_html=True)
+
+    if st.button("Back to Home"):
+        navigate_to("home")
 
     brand_list = sorted([
-        'Abarth', 'Acura', 'Aixam', 'Alfa Romeo', 'Alpine', 'Aston Martin',
-        'Audi', 'Austin', 'Autobianchi', 'Baic', 'Bentley', 'BMW', 'Buick',
-        'Cadillac', 'Chevrolet', 'Chrysler', 'Citroën', 'Cupra', 'Dacia',
-        'Daewoo', 'Daihatsu', 'DFSK', 'DKW', 'Dodge', 'DS Automobiles',
-        'FAW', 'Ferrari', 'Fiat', 'Ford', 'Gaz', 'GMC', 'Honda', 'Hummer',
-        'Hyundai', 'Infiniti', 'Isuzu', 'Iveco', 'Jaguar', 'Jeep', 'Kia',
-        'Lada', 'Lamborghini', 'Lancia', 'Land Rover', 'Lexus', 'Lincoln',
-        'Lotus', 'Warszawa', 'Maserati', 'Maybach', 'Mazda', 'McLaren',
-        'Mercedes-Benz', 'Mercury', 'MG', 'Microcar', 'MINI', 'Mitsubishi',
-        'Moskwicz', 'Nissan', 'NSU', 'Nysa', 'Oldsmobile', 'Opel',
-        'Toyota', 'Tata', 'Uaz', 'Żuk', 'Trabant', 'Suzuki', 'Inny',
-        'Volvo', 'Subaru', 'Volkswagen', 'SsangYong', 'Saab', 'Plymouth',
-        'Renault', 'Peugeot', 'Rolls-Royce', 'RAM', 'Triumph', 'Rover',
-        'Wołga', 'Tarpan', 'Polonez', 'Pontiac', 'Porsche', 'Santana',
-        'Saturn', 'Scion', 'Seat', 'Škoda', 'Smart', 'Syrena', 'Talbot',
-        'Tavria', 'Tesla', 'Vanderhall', 'Vauxhall', 'Wartburg',
-        'Zaporożec', 'Zastava'
+        "Abarth", "Acura", "Aixam", "Alfa Romeo", "Alpine", "Aston Martin",
+        "Audi", "Austin", "Autobianchi", "Baic", "Bentley", "BMW", "Buick",
+        "Cadillac", "Chevrolet", "Chrysler", "Citroen", "Cupra", "Dacia",
+        "Daewoo", "Daihatsu", "DFSK", "DKW", "Dodge", "DS Automobiles",
+        "FAW", "Ferrari", "Fiat", "Ford", "Gaz", "GMC", "Honda", "Hummer",
+        "Hyundai", "Infiniti", "Isuzu", "Iveco", "Jaguar", "Jeep", "Kia",
+        "Lada", "Lamborghini", "Lancia", "Land Rover", "Lexus", "Lincoln",
+        "Lotus", "Warszawa", "Maserati", "Maybach", "Mazda", "McLaren",
+        "Mercedes-Benz", "Mercury", "MG", "Microcar", "MINI", "Mitsubishi",
+        "Moskwicz", "Nissan", "NSU", "Nysa", "Oldsmobile", "Opel",
+        "Toyota", "Tata", "Uaz", "Zuk", "Trabant", "Suzuki", "Inny",
+        "Volvo", "Subaru", "Volkswagen", "SsangYong", "Saab", "Plymouth",
+        "Renault", "Peugeot", "Rolls-Royce", "RAM", "Triumph", "Rover",
+        "Wolga", "Tarpan", "Polonez", "Pontiac", "Porsche", "Santana",
+        "Saturn", "Scion", "Seat", "Skoda", "Smart", "Syrena", "Talbot",
+        "Tavria", "Tesla", "Vanderhall", "Vauxhall", "Wartburg",
+        "Zaporozec", "Zastava"
     ])
 
     country_list = [
@@ -732,469 +880,785 @@ def predict_page():
         "Denmark", "Norway", "Finland", "Portugal", "Greece", "Thailand", "Vietnam"
     ]
 
-    fuel_list = ['Gasoline', 'Gasoline + LPG', 'Diesel', 'Hybrid',
-                 'Gasoline + CNG', 'Hydrogen', 'Electric']
-    drive_list = ['Front wheels', 'Rear wheels', '4x4 (attached automatically)',
-                  '4x4 (permanent)', '4x4 (attached manually)']
-    body_list = ['small_cars', 'coupe', 'city_cars', 'convertible', 'compact',
-                 'SUV', 'sedan', 'station_wagon', 'minivan']
-    color_list = ["Black", "White", "Grey", "Silver", "Blue", "Red",
-                  "Yellow", "Green", "Other"]
+    fuel_list     = ["Gasoline", "Gasoline + LPG", "Diesel", "Hybrid",
+                     "Gasoline + CNG", "Hydrogen", "Electric"]
+    body_list     = ["small_cars", "coupe", "city_cars", "convertible",
+                     "compact", "SUV", "sedan", "station_wagon", "minivan"]
+    color_list    = ["Black", "White", "Grey", "Silver", "Blue",
+                     "Red", "Yellow", "Green", "Other"]
+    trans_list    = ["Manual", "Automatic"]
 
     with st.form("prediction_form"):
+        st.markdown(
+            "<div class='form-section-title'>Vehicle Identity</div>",
+            unsafe_allow_html=True
+        )
         col1, col2 = st.columns(2, gap="large")
-
         with col1:
-            st.markdown("#### 🚗 Vehicle Details")
-            brand_choice = st.selectbox("Brand *", ["— select —"] + brand_list)
-            vehicle_model = st.text_input("Model", placeholder="e.g. Golf, Astra, Corolla…")
-            production_year = st.slider("Production Year *", 1915, 2021, 2010)
-            mileage_km = st.slider("Mileage (km) *", 0, 1_000_000, 100_000, step=500)
-            power_HP = st.slider("Power (HP) *", 10, 1_500, 150)
-            displacement_cm3 = st.slider("Displacement (cm³) *", 500, 8_000, 2_000, step=1)
-
+            brand_choice  = st.selectbox("Brand *", ["-- select --"] + brand_list)
+            vehicle_model = st.text_input("Model", placeholder="e.g. Golf, Astra, Corolla...")
+            condition     = st.selectbox("Condition *", ["-- select --", "Used", "New"])
         with col2:
-            st.markdown("#### ⚙️ Specifications")
-            fuel_type = st.selectbox("Fuel Type *", ["— select —"] + fuel_list)
-            transmission = st.selectbox("Transmission *", ["— select —", "Manual", "Automatic"])
-            drive = st.selectbox("Drive *", ["— select —"] + drive_list)
-            car_type = st.selectbox("Body Type *", ["— select —"] + body_list)
-            colour = st.selectbox("Colour", ["— select —"] + color_list)
-            condition = st.selectbox("Condition *", ["— select —", "Used", "New"])
+            production_year = st.slider("Production Year *", 1915, CURRENT_YEAR, 2015)
+            colour          = st.selectbox("Colour", ["-- select --"] + color_list)
+            origin_country  = st.selectbox("Country of Origin", ["-- select --"] + country_list)
 
-        st.markdown("#### 📍 Additional Information")
-        a1, a2, a3 = st.columns(3)
+        st.markdown(
+            "<div class='form-section-title'>Engine & Mechanics</div>",
+            unsafe_allow_html=True
+        )
+        c1, c2, c3 = st.columns(3, gap="medium")
+        with c1:
+            mileage_km       = st.slider("Mileage (km) *", 0, 1_000_000, 100_000, step=1000)
+            fuel_type        = st.selectbox("Fuel Type *", ["-- select --"] + fuel_list)
+        with c2:
+            power_HP         = st.slider("Power (HP) *", 10, 1_500, 150)
+            transmission     = st.selectbox("Transmission *", ["-- select --"] + trans_list)
+        with c3:
+            displacement_cm3 = st.slider("Displacement (cm3) *", 0, 8_000, 2_000, step=50)
+            car_type         = st.selectbox("Body Type *", ["-- select --"] + body_list)
+
+        st.markdown(
+            "<div class='form-section-title'>Additional Information</div>",
+            unsafe_allow_html=True
+        )
+        a1, a2, a3 = st.columns(3, gap="medium")
         with a1:
-            origin_country = st.selectbox("Country of Origin", ["— select —"] + country_list)
+            first_owner    = st.selectbox("First Owner", ["No", "Yes"])
         with a2:
-            first_owner = st.selectbox("First Owner", ["— select —", "Yes", "No"])
+            doors_number   = st.selectbox("Doors", [3, 4, 5, 2], index=1)
         with a3:
-            offer_location = st.text_input("Location", placeholder="e.g. Warszawa, Kraków, ...")
+            offer_location = st.text_input("Location", placeholder="e.g. Warszawa, Krakow...")
 
-        features = st.text_input(
-            "Features (comma separated)",
-            placeholder="e.g. ABS, GPS, Leather seats, Climatronic"
+        features_input = st.text_area(
+            "Equipment / Features (comma-separated, optional)",
+            placeholder="e.g. ABS, GPS, Leather seats, Climatronic, Parking sensors",
+            height=80
         )
 
-        submitted = st.form_submit_button("🔮  Calculate Valuation", use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        submitted = st.form_submit_button(
+            "Calculate Valuation", use_container_width=True
+        )
 
     if submitted:
         errors = []
-        if brand_choice == "— select —":
-            errors.append("Brand")
-        if fuel_type == "— select —":
-            errors.append("Fuel Type")
-        if transmission == "— select —":
-            errors.append("Transmission")
-        if drive == "— select —":
-            errors.append("Drive")
-        if car_type == "— select —":
-            errors.append("Body Type")
-        if condition == "— select —":
-            errors.append("Condition")
+        if brand_choice == "-- select --": errors.append("Brand")
+        if fuel_type    == "-- select --": errors.append("Fuel Type")
+        if transmission == "-- select --": errors.append("Transmission")
+        if car_type     == "-- select --": errors.append("Body Type")
+        if condition    == "-- select --": errors.append("Condition")
 
         if errors:
-            st.error(f"⚠️ Please fill in the required fields: **{', '.join(errors)}**")
+            st.error(f"Please fill in the required fields: **{', '.join(errors)}**")
         else:
-            try:
-                user_inputs = {
-                    "Condition": condition,
-                    "Vehicle_brand": brand_choice,
-                    "Vehicle_model": vehicle_model or "Unknown",
-                    "Production_year": production_year,
-                    "Mileage_km": mileage_km,
-                    "Power_HP": power_HP,
-                    "Displacement_cm3": displacement_cm3,
-                    "Fuel_type": fuel_type,
-                    "Drive": drive,
-                    "Transmission": transmission,
-                    "Type": car_type,
-                    "Doors_number": 5,
-                    "Colour": colour,
-                    "Origin_country": origin_country,
-                    "First_owner": "No" if first_owner == "— select —" else first_owner,
-                    "Offer_location": offer_location or "Unknown",
-                    "Features": features or ""
-                }
+            with st.spinner("Calculating valuation..."):
+                try:
+                    user_inputs = {
+                        "Condition":        condition,
+                        "Vehicle_brand":    brand_choice,
+                        "Vehicle_model":    vehicle_model or "Unknown",
+                        "Production_year":  production_year,
+                        "Mileage_km":       mileage_km,
+                        "Power_HP":         power_HP,
+                        "Displacement_cm3": displacement_cm3,
+                        "Fuel_type":        fuel_type,
+                        "Drive":            "Front wheels",
+                        "Transmission":     transmission,
+                        "Type":             car_type,
+                        "Doors_number":     int(doors_number),
+                        "Colour":           colour if colour != "-- select --" else "Other",
+                        "Origin_country":   origin_country if origin_country != "-- select --" else "unknown",
+                        "First_owner":      1 if first_owner == "Yes" else 0,
+                        "Offer_location":   offer_location or "Unknown",
+                        "Features":         features_input or "",
+                    }
 
-                final_df = prepare_input_data(user_inputs)
-                y_log = pipeline.predict(final_df)[0]
-                price_raw = np.expm1(y_log)
+                    final_df = prepare_input_data(user_inputs)
+                    y_log  = pipeline.predict(final_df)[0]
+                    price  = float(np.expm1(y_log))
 
-                def get_inflation_factor(production_year):
-                    vehicle_age_2021 = 2021 - production_year
-                    
-                    if vehicle_age_2021 <= 3:      
-                        return 1.45                 
-                    elif vehicle_age_2021 <= 8:    
-                        return 1.37                 
-                    elif vehicle_age_2021 <= 15:   
-                        return 1.25                 
-                    elif vehicle_age_2021 <= 30:  
-                        return 1.15                
-                    else:                          
-                        return 1.05      
+                    price_low  = price * 0.85
+                    price_high = price * 1.15
 
-                INFLATION_FACTOR = get_inflation_factor(production_year)
-                price = price_raw * INFLATION_FACTOR          
-
-                price_min = price * 0.85
-                price_max = price * 1.15
-
-                inflation_applied = True
-
-                st.markdown(f"""
-                <div class='price-card'>
-                    <div class='price-label'>💰 Estimated Market Value</div>
-                    <div class='price-value'>{price:,.0f} PLN</div>
-                    <div class='price-range'>Range: {price_min:,.0f} – {price_max:,.0f} PLN</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                if inflation_applied:
                     st.markdown(f"""
-                    <div class='info-box' style='margin-top: -8px; margin-bottom: 16px;'>
-                        <p>📈 <b>Inflation adjustment applied:</b> Base model estimate was
-                        <b>{price_raw:,.0f} PLN</b>. A factor of <b>×{INFLATION_FACTOR}</b>
-                        was applied to reflect Polish automotive market price growth since 2021.</p>
+                    <div class='price-card'>
+                        <div class='price-label'>Estimated Market Value</div>
+                        <div class='price-value'>{price:,.0f} PLN</div>
+                        <div class='price-range'>
+                            Estimated range:&nbsp;
+                            <b style='color:#e2e8f0;'>{price_low:,.0f}</b>
+                            &nbsp;-&nbsp;
+                            <b style='color:#e2e8f0;'>{price_high:,.0f}</b> PLN
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
 
-                d1, d2, d3 = st.columns(3)
-                vehicle_age = 2021 - production_year
-                mileage_per_year = mileage_km / max(vehicle_age, 1)
-                hp_per_liter = power_HP / (displacement_cm3 / 1000)
+                    vehicle_age      = CURRENT_YEAR - production_year
+                    mileage_per_year = mileage_km / max(vehicle_age, 1)
+                    hp_per_liter     = power_HP / max(displacement_cm3 / 1000, 0.1)
+                    brand_tier       = get_brand_tier(brand_choice)
 
-                with d1:
-                    st.metric("Vehicle Age", f"{vehicle_age} years")
-                with d2:
-                    st.metric("Avg. Annual Mileage", f"{mileage_per_year:,.0f} km")
-                with d3:
-                    st.metric("Specific Power", f"{hp_per_liter:.1f} HP/L")
+                    d1, d2, d3, d4 = st.columns(4)
+                    with d1: st.metric("Vehicle Age",    f"{vehicle_age} years")
+                    with d2: st.metric("Annual Mileage", f"{mileage_per_year:,.0f} km")
+                    with d3: st.metric("Specific Power", f"{hp_per_liter:.1f} HP/L")
+                    with d4: st.metric("Market Segment", brand_tier)
 
-                otomoto_url = generate_otomoto_link(
-                    brand_choice, vehicle_model or "", production_year, price_min, price_max
-                )
-                st.markdown(f"""
-                <div class='info-box' style='margin-top: 24px;'>
-                    <p style='margin: 0 0 4px; font-size: 15px;'>
-                        🔍 Looking for a <b>{brand_choice} {vehicle_model or ''}</b>
-                        around <b>{price:,.0f} PLN</b>?
-                    </p>
-                    <a class='otomoto-btn' href='{otomoto_url}' target='_blank'>
-                        🚗  Browse similar cars on Otomoto
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
-
-                brand_cat = get_brand_reliability_category(brand_choice)
-                if brand_cat in ['Luxury', 'Vintage'] or power_HP > 500:
-                    st.markdown("""
-                    <div class='warning-box' style='margin-top: 16px;'>
-                        <p>⚠️ <b>Note:</b> This vehicle belongs to a special category
-                        (luxury / vintage / high-performance). Valuation accuracy may be
-                        lower due to limited market data.</p>
+                    otomoto_url = generate_otomoto_link(
+                        brand_choice, vehicle_model or "",
+                        production_year, price_low, price_high
+                    )
+                    st.markdown(f"""
+                    <div class='info-box' style='margin-top: 24px;'>
+                        <p style='margin: 0 0 8px; font-size: 14px;'>
+                            Looking for a <b>{brand_choice} {vehicle_model or ''}</b>
+                            around <b>{price:,.0f} PLN</b>?
+                        </p>
+                        <a class='otomoto-btn' href='{otomoto_url}' target='_blank'>
+                            Browse similar cars on Otomoto
+                        </a>
                     </div>
                     """, unsafe_allow_html=True)
 
-            except Exception as e:
-                st.error(f"❌ Valuation error: {str(e)}")
-                st.info("Please check your inputs and try again.")
+                    if brand_tier in ("Ultra_Luxury", "Niche") or power_HP > 500 or vehicle_age > 30:
+                        st.markdown("""
+                        <div class='warning-box' style='margin-top: 16px;'>
+                            <p><b>Note:</b> This vehicle belongs to a special market segment
+                            (luxury / vintage / high-performance). Valuation accuracy may be
+                            reduced due to limited comparable listings in the training data.</p>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-def regional_page():
+                except Exception as e:
+                    st.error(f"Valuation error: {e}")
+                    st.info("Please verify your inputs and try again. "
+                            "If the problem persists, the model service may be temporarily unavailable.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE: Regional Market
+# ═══════════════════════════════════════════════════════════════════════════
+
+def regional_page() -> None:
     st.markdown("""
-    <h1 style='margin-bottom: 8px;'>🗺️ Regional Market</h1>
-    <p style='color: #718096; margin-bottom: 24px; font-size: 16px;'>
-        Distribution of car listings across Poland based on 200,000+ entries.
+    <h1 style='margin-bottom: 6px;'>Regional Market</h1>
+    <p style='color: #64748b; margin-bottom: 20px; font-size: 15px;'>
+        Geographic distribution of car listings across Poland (200 000+ entries).
     </p>
     """, unsafe_allow_html=True)
 
+    if st.button("Back to Home"):
+        navigate_to("home")
+
     st.markdown("""
     <div class='info-box'>
-        <p>📌 Illustrative data — geographic distribution of listings from Polish automotive platforms.</p>
+        <p>Illustrative data - geographic distribution of listings from Polish
+        automotive platforms. Circle size and colour reflect the number of listings
+        in each city.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    if st.button("← Back"): navigate_to("home")
-
     city_sales, city_coords = load_sample_data()
 
-    poland_map = folium.Map(location=[52.0, 19.0], zoom_start=6, tiles='CartoDB dark_matter')
+    poland_map = folium.Map(
+        location=[52.0, 19.0], zoom_start=6, tiles="CartoDB dark_matter"
+    )
     max_sales = max(city_sales.values())
 
     for city, sales in city_sales.items():
         if city in city_coords:
             lat, lon = city_coords[city]
-            radius = 10 + (sales / max_sales) * 30
-            color = '#e53e3e' if sales > 3000 else '#ed8936' if sales > 2000 else '#ecc94b' if sales > 1000 else '#48bb78'
+            radius = 10 + (sales / max_sales) * 32
+            color = (
+                "#ef4444" if sales > 3000
+                else "#f97316" if sales > 2000
+                else "#eab308" if sales > 1000
+                else "#22c55e"
+            )
             folium.CircleMarker(
                 location=[lat, lon],
                 radius=radius,
                 popup=f"<b>{city}</b><br>{sales:,} listings",
                 color=color, fill=True, fillColor=color,
-                fillOpacity=0.75, weight=2
+                fillOpacity=0.72, weight=2
             ).add_to(poland_map)
 
     st_folium(poland_map, width=None, height=560)
 
-    st.markdown("### 📊 Top 10 Cities")
+    st.markdown("### Top 10 Cities by Listings")
     sorted_cities = sorted(city_sales.items(), key=lambda x: x[1], reverse=True)[:10]
-    chart_data = pd.DataFrame(sorted_cities, columns=['City', 'Listings'])
+    chart_data = pd.DataFrame(sorted_cities, columns=["City", "Listings"])
 
     fig = px.bar(
-        chart_data, x='City', y='Listings',
-        color='Listings', color_continuous_scale='Blues',
-        title='Number of Listings by City'
+        chart_data, x="City", y="Listings",
+        color="Listings", color_continuous_scale="ice",
+        title="Number of Listings by City"
     )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-        font_color='#cbd5e0', title_font_size=18,
-        coloraxis_showscale=False
-    )
+    fig.update_layout(**PLOT_BG, coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
         <div class='glass-card'>
-            <div class='feature-title'>🏙️ Urban vs Rural</div>
+            <div class='feature-title'>Urban vs Rural</div>
             <div class='feature-desc'>
-                Major cities (Gdańsk, Kraków, Wrocław) account for over 60% of listings.
-                Higher vehicle turnover in metropolitan areas.
-                Premium brands are more common in large cities.
+                Major cities (Warszawa, Krakow, Wroclaw) account for over 60% of listings.
+                Higher vehicle turnover in metropolitan areas drives more competitive pricing.
+                Premium brands are more frequently listed in large cities, reflecting higher
+                purchasing power in urban centres.
             </div>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         st.markdown("""
         <div class='glass-card'>
-            <div class='feature-title'>📈 Market Trends</div>
+            <div class='feature-title'>Regional Trends</div>
             <div class='feature-desc'>
-                Western Poland shows higher average prices.
-                Coastal cities prefer imported German vehicles.
-                Eastern regions more frequently choose budget brands.
-                Southern Poland dominates in number of offers.
+                Western Poland shows higher average prices due to proximity to German imports.
+                Coastal cities tend to favour imported German vehicles.
+                Eastern regions more frequently offer budget-segment brands.
+                Southern Poland (Silesia) leads in total number of offers due to
+                population density.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-def visualizations_page():
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE: Visualizations
+# ═══════════════════════════════════════════════════════════════════════════
+
+def visualizations_page() -> None:
     st.markdown("""
-    <h1 style='margin-bottom: 8px;'>📊 Data Visualizations</h1>
-    <p style='color: #718096; margin-bottom: 32px; font-size: 16px;'>
-        Key findings from the analysis of 200,000+ car listings.
+    <h1 style='margin-bottom: 6px;'>Data Visualizations</h1>
+    <p style='color: #64748b; margin-bottom: 24px; font-size: 15px;'>
+        Key findings from the analysis of 200 000+ car listings scraped from Otomoto.
+        Each chart is accompanied by an interpretation and practical takeaways.
     </p>
     """, unsafe_allow_html=True)
 
-    if st.button("← Back"): navigate_to("home")
+    if st.button("Back to Home"):
+        navigate_to("home")
 
-    np.random.seed(42)
+    viz_tab, model_tab, biz_tab = st.tabs([
+        "EDA Insights", "Model Analysis", "Business Insights"
+    ])
 
-    PLOT_LAYOUT = dict(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font_color='#cbd5e0',
-        title_font_size=18,
-        title_font_family='Syne',
-        margin=dict(t=48, b=32, l=16, r=16)
-    )
+    # ==================================================================
+    # TAB 1: EDA Insights
+    # ==================================================================
+    with viz_tab:
 
-    st.markdown("### 💰 Price Distribution")
-    col1, col2, col3 = st.columns([0.5, 3, 0.5])
-    with col2:
-        st.image("images/eda_price_distribution.png", use_container_width=True)
+        # -- 1. Price Distribution ------------------------------------
+        _section("Price Distribution")
+        _intro(
+            "Understanding how prices are distributed is the first step in any "
+            "pricing analysis. The chart below shows the raw price histogram "
+            "alongside the log-transformed version used during model training."
+        )
+        _show_image("images/eda_price_distribution.png")
+        _insight(
+            "The left panel reveals a strongly right-skewed distribution: the "
+            "majority of vehicles are listed below 100 000 PLN, with a median "
+            "of approximately 35 500 PLN. The mean is pulled significantly higher "
+            "by a small number of premium and luxury vehicles, making the median "
+            "a far better measure of the 'typical' market price. "
+            "The right panel shows the same data on a logarithmic scale, which "
+            "produces a near-normal bell curve. Training on log-transformed prices "
+            "stabilises variance, reduces the influence of extreme outliers, and "
+            "allows the model to learn proportional (percentage-based) price "
+            "changes rather than absolute PLN differences. This is crucial because "
+            "a 10 000 PLN error matters far more on a 30 000 PLN car than on a "
+            "300 000 PLN luxury vehicle."
+        )
 
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- 2. Depreciation -----------------------------------------
+        _section("Value Depreciation Over Time")
+        _intro(
+            "Depreciation is the single strongest price driver in the used-car market. "
+            "The following chart tracks how median prices decline as vehicles age."
+        )
+        _show_image("images/eda_depreciation_analysis.png")
+        _insight(
+            "Depreciation is steepest during the first 3 years: a typical car "
+            "loses 40-50% of its initial value once it leaves the 'new-car' bracket. "
+            "This reflects the loss of the new-car premium as soon as the vehicle "
+            "is registered and the rapid accumulation of initial mileage. After this "
+            "sharp decline, the rate of depreciation slows considerably, and median "
+            "prices stabilise once vehicles reach approximately 10-15 years of age. "
+            "Interestingly, very old vehicles (25+ years) can experience a price "
+            "increase as they enter the vintage or collector category - such models "
+            "attract enthusiasts and niche buyers willing to pay premiums that may "
+            "exceed the car's original market value. This non-linear relationship "
+            "is why Vehicle_age_squared is one of the model's most important features."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- 3. Mileage vs Price by Age -------------------------------
+        _section("Mileage vs Price by Vehicle Age")
+        _intro(
+            "Mileage and age interact in complex ways. A low-mileage old car is not the "
+            "same as a low-mileage new car. This scatter plot separates vehicles "
+            "into four age cohorts to reveal these dynamics."
+        )
+        _show_image("images/eda_mileage_vs_price_by_age.png")
+        _insight(
+            "The mileage-price relationship changes dramatically across age groups. "
+            "New vehicles (0-2 years) command premiums of 50k-1M PLN even with "
+            "some mileage, because they retain dealer-level residual value. "
+            "Recent cars (3-8 years) retain strong value below 100k km but depreciate "
+            "steeply above that threshold. Used vehicles (9-16 years) dominate the "
+            "mass market below 200k PLN - this is where the model achieves its best "
+            "accuracy due to abundant training data. Old cars (>16 years) are "
+            "generally priced below 50k PLN, with notable exceptions for vintage "
+            "collectibles that defy the standard depreciation curve. "
+            "This interaction explains why the Age_Mileage_interaction feature "
+            "ranks among the top 15 most important features in the final model."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- 4. Top 20 Brands ----------------------------------------
+        _section("Median Price - Top 20 Brands")
+        _intro(
+            "Brand positioning is a key factor in used-car pricing. This chart ranks "
+            "the 20 most popular brands by their median listing price."
+        )
+        _show_image("images/eda_median_preice_top20_brands.png")
+        _insight(
+            "Mercedes-Benz leads with a median price of approximately 62 000 PLN, "
+            "followed closely by BMW (~60 000 PLN) and Audi (~50 000 PLN). These "
+            "three German premium brands form a clear upper tier separated from the "
+            "mass-market cluster at 20 000-40 000 PLN. Brands whose median exceeds "
+            "the overall market median are highlighted, marking the premium boundary. "
+            "The gap between premium and mass-market brands is substantial - nearly "
+            "2x in median price - which is why Brand_tier is an effective feature. "
+            "Notably, Volkswagen sits at the top of the mass-market range, "
+            "reflecting its broad model portfolio spanning from budget Polos to "
+            "premium Touaregs. This within-brand variance is captured by the "
+            "BrandModel_frequency and Rarity_index features."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- 5. Fuel Type Trends -------------------------------------
+        _section("Price Trends by Fuel Type")
+        _intro(
+            "Different fuel types follow distinct market trajectories. This chart "
+            "shows how average listing prices have evolved across production years "
+            "for each powertrain category."
+        )
+        _show_image("images/eda_average_car_price_over_the_years_by_fuel_type.png")
+        _insight(
+            "Electric vehicles show a sharp price increase post-2010, reflecting "
+            "battery technology maturation and premium positioning - most EVs on the "
+            "Polish market are priced above the overall median. Hybrid vehicles show "
+            "moderate growth in the mid-range segment, driven largely by Toyota's "
+            "hybrid lineup. Diesel and Gasoline follow steady historical increases "
+            "with notable divergence post-2018 as diesel faces regulatory headwinds "
+            "in European markets. LPG-converted vehicles consistently trade at a "
+            "discount, reflecting buyer perception of higher maintenance complexity. "
+            "These fuel-type dynamics are captured by the model through the Fuel_type "
+            "categorical feature, which carries a SHAP value of ~0.02."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+    # ==================================================================
+    # TAB 2: Model Analysis
+    # ==================================================================
+    with model_tab:
+
+        # -- SHAP Feature Importance ----------------------------------
+        _section("SHAP Feature Importance")
+        _intro(
+            "SHAP (SHapley Additive exPlanations) values measure each feature's "
+            "average marginal contribution to predictions. Unlike split-based "
+            "importance, SHAP provides a theoretically grounded, model-agnostic "
+            "measure of feature impact."
+        )
+        _show_image("images/SHAP_feature_importance_professional.png")
+        _insight(
+            "Vehicle Age dominates with a mean SHAP value of ~0.55, confirming "
+            "depreciation as the single strongest price driver in the Polish "
+            "used-car market. Engine Power (HP) ranks second at ~0.18, reflecting "
+            "that performance specifications create the largest intra-age price "
+            "variation. Vehicle Model (~0.15) captures brand- and model-specific "
+            "residual value that cannot be explained by generic specifications. "
+            "Mileage (~0.12) is less influential than age, suggesting that buyers "
+            "weight vehicle freshness (age) more heavily than accumulated wear "
+            "(mileage). Vehicle Type and Fuel Type carry marginal SHAP values "
+            "(0.01-0.03), indicating their effects are largely subsumed by the "
+            "more informative primary features."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- XGBoost Feature Importance -------------------------------
+        _section("XGBoost Split-Based Feature Importance")
+        _intro(
+            "Split-based importance measures how frequently each feature is used "
+            "to create decision splits across all trees. It complements SHAP by "
+            "showing which features the model relies on most structurally."
+        )
+        _show_image("images/model3_feature_importance_xgb.png")
+        _insight(
+            "Is_new_car emerges as the single most critical split feature, "
+            "capturing the structural price discontinuity between new and used "
+            "vehicles - the first registration event causes an immediate 20-30% "
+            "value drop. Vehicle_age_squared (21%) and Vehicle_age (8%) together "
+            "account for ~29% of all splits, modelling the non-linear depreciation "
+            "curve. Transmission (10%) reflects the substantial automatic gearbox "
+            "premium in the Polish market, where manual transmission is still "
+            "the default for many brands. Interestingly, Brand_frequency and "
+            "Rarity_index appear in the top 20 despite being engineered features, "
+            "validating the domain-driven feature engineering approach."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- Error Analysis -------------------------------------------
+        _section("Error Analysis by Vehicle Age")
+        _intro(
+            "Analysing prediction errors by production year reveals where the "
+            "model performs well and where it struggles. Symmetric errors near "
+            "zero indicate good calibration."
+        )
+        _show_image("images/corrected_residuals_vs_year_of_production_xgb_before_cleaning.png")
+        _insight(
+            "Residuals for mass-market vehicles (2000-2021) are tightly clustered "
+            "around zero with low variance, confirming strong model calibration "
+            "in this core segment. The largest errors appear for vintage vehicles "
+            "(pre-1980, RMSE ~59 000 PLN) and modern supercars, both of which are "
+            "priced by rarity and collector demand rather than standard specifications. "
+            "Vehicles from 1990-2000 show slightly higher variance than the 2000-2020 "
+            "range, likely because this transition period includes both well-maintained "
+            "classics and heavily depreciated daily drivers with identical specs. "
+            "These patterns confirm the model's warning about reduced accuracy "
+            "for luxury, vintage, and exotic segments."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- Learning Curves ------------------------------------------
+        _section("Learning Curves")
+        _intro(
+            "Learning curves track model performance as training data increases. "
+            "The gap between training and validation scores indicates how much "
+            "the model benefits from additional data."
+        )
+        _show_image("images/tuned_model_learning_curves.png")
+        _insight(
+            "Training and validation curves converge smoothly with a minimal "
+            "overfitting gap (< 2% R&sup2; difference at full dataset size). "
+            "A clear plateau is visible beyond ~150 000 samples, suggesting that "
+            "additional data alone is unlikely to substantially improve performance "
+            "without introducing new feature types. This indicates the model has "
+            "reached the limit of what 41 tabular features can capture. Potential "
+            "gains would likely require NLP-derived features from listing "
+            "descriptions, image-based condition assessment, or external data "
+            "sources such as vehicle history reports."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # -- Model Comparison -----------------------------------------
+        _section("Model Comparison")
+        _intro(
+            "Four architectures were systematically compared using identical "
+            "train/test splits and cross-validation to ensure a fair assessment."
+        )
+        _show_image("images/model_comparison.png")
+        _insight(
+            "Ridge Regression (R&sup2; 72.4%) serves as a linear baseline, demonstrating "
+            "that even a simple model can capture the dominant linear trends "
+            "(depreciation, power). Random Forest (R&sup2; 92.2%) shows a dramatic jump, "
+            "proving that non-linear feature interactions are essential for accurate "
+            "pricing. XGBoost Base (R&sup2; 93.0%) was selected as the production model "
+            "because it achieves the best test-set MAPE (18.6%) while maintaining "
+            "stable generalisation. XGBoost Weighted (R&sup2; 92.0%) trades ~1% overall "
+            "accuracy for improved performance on rare luxury segments - a reasonable "
+            "trade-off for some business use cases, but the base model was preferred "
+            "for general deployment."
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+    # ==================================================================
+    # TAB 3: Business Insights
+    # ==================================================================
+    with biz_tab:
+
+        st.markdown("""
+        <div style='margin-bottom: 28px;'>
+            <h2 style='margin-bottom: 8px;'>Business Insights</h2>
+            <p style='color: #64748b; font-size: 15px; line-height: 1.7;'>
+                Actionable conclusions derived from the analysis of 200 000+ car listings
+                and the trained pricing model. These insights are relevant for car dealers,
+                fleet managers, insurance companies, and individual buyers or sellers.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 1: Depreciation timing
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>1. The First 3 Years Are the Most Expensive</h4>
+            <p>
+                Vehicles lose <span class='highlight'>40-50% of their value</span> within
+                the first 3 years of ownership. For a car purchased new at 120 000 PLN,
+                this translates to a depreciation cost of 48 000-60 000 PLN - roughly
+                16 000-20 000 PLN per year. After year 3, annual depreciation drops to
+                approximately 5 000-8 000 PLN. <b>For cost-conscious buyers, purchasing a
+                3-4 year old vehicle offers the best value proposition</b>, as it avoids
+                the steepest depreciation while retaining modern safety features and
+                warranty coverage.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 2: Premium brand premium
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>2. The German Premium Tax Is Real - and Quantifiable</h4>
+            <p>
+                Mercedes-Benz, BMW, and Audi command a
+                <span class='highlight'>60-80% median price premium</span> over comparable
+                mass-market vehicles of the same age and mileage. This premium persists across
+                all age categories but narrows for vehicles older than 15 years, where
+                maintenance costs and parts availability become the dominant pricing factor.
+                <b>For dealers, stocking 3-8 year old German premium vehicles offers the highest
+                margins</b>, but requires careful inspection to avoid high-mileage units that
+                have crossed the cost-benefit threshold.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 3: Transmission premium
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>3. Automatic Transmission Commands a Consistent Premium</h4>
+            <p>
+                In the Polish market, where manual transmission remains the default for many
+                brands, automatic gearboxes add approximately
+                <span class='highlight'>8-15% to the resale value</span> of equivalent vehicles.
+                This premium is strongest for SUVs and premium sedans and weakest for city
+                cars. <b>Sellers with automatic-transmission vehicles can position their
+                asking price at the upper end of comparable listings</b>. The model captures
+                this through Transmission as one of the top 10 most important features.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 4: Electric vehicles
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>4. Electric Vehicles Hold Value Differently</h4>
+            <p>
+                Post-2018 EVs show <span class='highlight'>lower depreciation rates</span>
+                than comparable ICE vehicles in the first 5 years, primarily due to limited
+                supply on the secondary market and growing demand driven by rising fuel costs
+                and urban driving restrictions. However, EVs older than 8 years depreciate
+                faster due to battery degradation concerns. <b>This creates a narrow sweet
+                spot (3-6 years) where used EVs offer the best value for buyers and the
+                highest residual value for sellers.</b>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 5: Geographic pricing
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>5. Location Matters More Than Most Sellers Realise</h4>
+            <p>
+                The same vehicle can be listed at
+                <span class='highlight'>10-20% different prices</span> depending on the
+                city. Western Poland (proximity to Germany) shows higher average prices for
+                German brands, while eastern regions favour budget segments. Major cities
+                (Warszawa, Krakow, Wroclaw) account for over 60% of all listings, creating
+                higher competition but also faster turnover. <b>Sellers in smaller cities
+                may benefit from listing on national platforms rather than local ones to
+                reach buyers in higher-price urban markets.</b>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 6: Mileage threshold
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>6. The 100 000 km Psychological Barrier</h4>
+            <p>
+                The data shows a <span class='highlight'>noticeable price drop</span> when
+                vehicles cross the 100 000 km threshold, particularly for vehicles under
+                8 years old. This drop exceeds what the linear mileage-price relationship
+                would predict, suggesting a psychological pricing effect. <b>For sellers
+                approaching this threshold, listing the vehicle before crossing 100 000 km
+                can preserve 5-8% of the asking price.</b> The model accounts for this
+                through the Mileage_km_squared polynomial feature.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 7: Equipment value
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>7. Equipment Lists Add Measurable Value</h4>
+            <p>
+                Listings with <span class='highlight'>10+ listed features</span> (e.g. ABS,
+                GPS, leather seats, parking sensors, climatronic) sell at approximately
+                8-12% higher prices than sparsely described listings of otherwise identical
+                vehicles. This is captured by the Num_features count. <b>Sellers should
+                invest time in creating comprehensive equipment lists - it is free and directly
+                impacts the model's price estimate and, by extension, buyer perception.</b>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Insight 8: Model accuracy scope
+        st.markdown("""
+        <div class='biz-card'>
+            <h4>8. When to Trust (and Distrust) the Model</h4>
+            <p>
+                The model achieves its <span class='highlight'>highest accuracy
+                (MAPE < 15%)</span> for mass-market vehicles aged 3-15 years with
+                30 000-200 000 km. Accuracy degrades significantly for: ultra-luxury
+                brands (Ferrari, Lamborghini - MAPE > 40%), vintage collectors (pre-1985),
+                rare models with fewer than 20 comparable listings, and highly customised
+                vehicles. <b>For business use, the model is best suited as a pricing
+                baseline for the mass-market segment, complemented by expert
+                appraisal for special vehicles.</b>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAGE: About Model
+# ═══════════════════════════════════════════════════════════════════════════
+
+def info_page() -> None:
     st.markdown("""
-    <div class='info-box'><p>
-    📌 The left chart shows a strongly right-skewed price distribution. 
-    Most vehicles are priced below 100,000 PLN, with a median of around 35,500 PLN 
-    The mean is much higher than the median indicating that a small number of expensive 
-    premium vehicles pull the average upward. In this case, the median better represents 
-    the typical car price
-
-    The right chart shows the distribution after a logarithmic transformation which 
-    reduces skewness and makes the data more symmetrical and closer to a normal distribution 
-    Using a log-transformed target variable can improve regression performance by stabilizing 
-    variance, reducing the impact of extreme outliers, and better capturing proportional 
-    relationships between features and price.
-    </p></div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    st.markdown("### 📉 Value Depreciation")
-
-    col1, col2, col3 = st.columns([0.5, 3, 0.5])
-    with col2:
-        st.image("images/eda_depreciation_analysis.png", use_container_width=True)
-
-    st.markdown("""
-    <div class='info-box'><p>
-        📌 Vehicle depreciation is most pronounced during the first three years, when a 
-            typical car loses 40–50% of its initial value. This period reflects the 
-            steepest decline in market price, as new vehicles quickly lose their 
-            “new car” premium. After this initial phase, the rate of depreciation 
-            slows, and prices begin to gradually stabilize, especially once vehicles 
-            reach around 10–15 years of age.
-            Interestingly, some vehicles that are older than 25 years may experience an 
-            increase in value, as certain models transition into the vintage or collector
-            category. These cars become highly sought after by enthusiasts, collectors,
-            and niche markets, often commanding prices that can exceed their original market
-            value.
-                
-    </p></div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    st.markdown("### 🏆 Average Price by Brand")
-
-    col1, col2, col3 = st.columns([0.5, 3, 0.5])
-    with col2:
-        st.image("images/eda_median_preice_top20_brands.png", use_container_width=True)
-
-    st.markdown("""
-    <div class='info-box'><p>
-        📌 The bar chart shows the most popular vehicle brands along with their median 
-            prices. Brands with prices above the overall median are highlighted, 
-            representing the premium segment of the market.
-            At the top of the ranking is Mercedes-Benz, with a median price of approximately
-             62,000 PLN. The second and third spots are also taken by German brands — BMW 
-            (~60,000 PLN) and Audi (~50,000 PLN). Another premium European brand, Volvo, 
-            also maintains a relatively high median price of nearly 49,000 PLN.
-            The remaining brands have noticeably lower median prices, typically ranging 
-            from 20,000 PLN to 40,000 PLN, and include vehicles from Asian, French, and 
-            American manufacturers. Their median prices are roughly 2–3 times lower than 
-            those of the leading German brands, highlighting a clear segmentation in the market.
-                            
-    </p></div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    st.markdown("### 🎯 Most Important Model Features")
-
-    col1, col2, col3 = st.columns([0.5, 3, 0.5])
-    with col2:
-        st.image("images/SHAP_feature_importance.png", use_container_width=True)
-
-    st.markdown("""
-    <div class='info-box'><p>
-        📌 The most influential feature in the model is Vehicle Age, with a SHAP importance 
-            of around 0.55. The second most important factor is Engine Power (HP), roughly 
-            three times less influential. Other significant predictors include Vehicle Model 
-            (~0.15) and Mileage (km) (~0.12).
-            These results align well with real-world car pricing: age, engine power, and 
-            mileage are the primary drivers of value. In the final XGBoost model, additional
-            emphasis was placed on Vehicle Age to better differentiate typical cars from 
-            niche or collector vehicles, such as supercars. This confirms that the model’s 
-            feature importance is both reasonable and interpretable.
-            At the lower end, Vehicle Type and Fuel Type have minimal impact, with SHAP 
-            values between 0.01 and 0.03. While these features contribute slightly, they 
-            play a much smaller role compared to the main mechanical and usage-related 
-            characteristics.
-        
-    </p></div>
-    """, unsafe_allow_html=True)
-
-def info_page():
-    st.markdown("""
-    <h1 style='margin-bottom: 8px;'>🧠 How the Model Works</h1>
-    <p style='color: #718096; margin-bottom: 32px; font-size: 16px;'>
-        Architecture, training process and limitations of the XGBoost model.
+    <h1 style='margin-bottom: 6px;'>How the Model Works</h1>
+    <p style='color: #64748b; margin-bottom: 24px; font-size: 15px;'>
+        Architecture, training process, and limitations of the XGBoost pipeline.
     </p>
     """, unsafe_allow_html=True)
 
     st.markdown("""
-### 🎯 Model Overview
-The application uses an **XGBoost** model trained on data from the Polish automotive market
-to estimate **used car prices**.
+### Model Overview
+The application uses an **XGBoost** gradient-boosting model trained on data
+scraped from the Polish automotive market to estimate **used car prices** in PLN.
+The model processes 41 engineered features and outputs a log-scale prediction
+that is inverse-transformed to the original PLN scale.
 
 ---
 
-### 🚀 Why XGBoost?
+### Why XGBoost?
 
-| Model | R² | MAPE | Status |
+| Model | R^2 | MAPE | Status |
 |-------|-----|------|--------|
-| Linear Regression | 0.831 | 29.3% | ❌ Baseline |
-| Random Forest | 0.938 | 20.0% | ✅ Good |
-| **XGBoost (tuned)** | **0.924** | **17.2%** | ⭐ Selected |
+| Ridge Regression | 0.724 | 28.5% | Baseline |
+| Random Forest | 0.922 | 22.8% | Good |
+| **XGBoost (base)** | **0.930** | **18.6%** | Selected |
 
 **Key advantages:**
-- 🎯 Gradient Boosting — sequentially improves predictions
-- 🛡️ Robust to noise and missing values
-- ⚡ Lightning-fast predictions (< 1 s)
-- 🔧 L1/L2 regularisation — prevents overfitting
+- Sequential boosting - each tree corrects the previous one's errors
+- Robust to noise and missing values
+- Inference < 1 second
+- L1 / L2 regularisation prevents overfitting on sparse segments
 
 ---
 
-### 📊 Model Features
+### Feature Set (41 features)
 
-**Base features:** Brand, Model, Year, Mileage, Power, Displacement, Fuel, Transmission, Drive, Body type, Colour, Location, Condition, Country of origin
+**Raw inputs (14):** Brand, Model, Year, Mileage, Power, Displacement, Fuel type,
+Transmission, Body type, Doors, Colour, Location, Condition, Country of origin
 
-**Engineered features:**
-- `HP_per_liter`, `Mileage_per_year`, `Usage_intensity`
-- `Age_category`, `Brand_category`, `Is_premium`, `is_collector`
-- Interactions: `Age × Mileage`, `Power × Age`
-- Log-transforms and squared features
+**Engineered features (27):**
+
+| Feature | Description |
+|---------|-------------|
+| `Vehicle_age` | Current year - production year |
+| `Age_category` | New / Recent / Used / Old |
+| `Is_new_car`, `Is_old_car` | Binary flags for age extremes |
+| `Mileage_per_year` | Mileage / age |
+| `Usage_intensity` | Low / Average / High / Very_High categorical bin |
+| `HP_per_liter` | Power per litre of displacement |
+| `Performance_category` | Economy / Standard / Performance / High |
+| `Is_premium`, `Is_supercar` | Brand-tier binary flags |
+| `Is_collector` | Flag for cars > 25 years old |
+| `Listing_year` | Year the listing was published |
+| `Num_features` | Count of listed equipment items |
+| `Brand_tier` | Mass_Market / Premium / Luxury / Ultra_Luxury / Niche |
+| `Brand_frequency` | Brand's share of total listings |
+| `Rarity_index` | Log-normalised inverse of brand frequency |
+| `BrandModel_frequency` | Brand x Model combination frequency |
+| `Brand_popularity` | Ultra_Rare / Rare / Uncommon / Common / Popular |
+| Log-transformed | `Mileage_km_log`, `Power_HP_log`, `Displacement_cm3_log` |
+| Polynomial | `*_squared` terms for age, power, mileage |
+| Interaction | `Age x Mileage`, `Power x Age`, `MileagePerYear x Age` |
 
 ---
 
-### 🎯 Model Results
+### Final Results
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
-| **R²** | 92.4% | Explains ~92.5% of price variance |
-| **RMSE** | 23,048 PLN | Typical absolute error |
-| **MAE** | 8,109 PLN | Mean absolute error |
-| **MAPE** | 17.2% | ~17% relative deviation |
+| **R^2** | 93.0% | Explains ~93% of price variance |
+| **RMSE** | 35 170 PLN | Root mean squared error |
+| **MAE** | 11 900 PLN | Mean absolute error |
+| **MAPE** | 18.6% | ~19% average relative deviation |
 
 ---
 
-### 🔬 Training Process
+### Training Pipeline
 
-1. **Data collection** — 200,000+ listings from Polish platforms
-2. **Preprocessing** — duplicate removal, outlier handling, normalisation
-3. **Feature Engineering** — support for the model
-4. **Model selection** — comparison of 3 algorithms
-5. **Tuning** — Optuna (50+ Bayesian optimisation trials)
-6. **Validation** — 80/20 split, cross-validation
-7. **Deployment** — Streamlit + Hugging Face Hub
+1. **Data collection** - 200 000+ listings scraped from Otomoto (2024-2026)
+2. **Preprocessing** - duplicate removal, currency conversion, outlier handling
+3. **Feature engineering** - 41 features derived from 14 raw inputs
+4. **Model selection** - Ridge vs Random Forest vs XGBoost comparison
+5. **Hyperparameter tuning** - Optuna Bayesian optimisation, 50+ trials
+6. **Validation** - 80/20 train/test split + 3-fold cross-validation
+7. **Deployment** - Streamlit, Hugging Face Hub, Docker
 
 ---
 
-### ⚠️ Limitations
+### Limitations
 
-✅ **Model performs well for:**
-- Mass-market cars (VW, Toyota, Ford, Opel, Škoda)
-- Standard configurations (100–300 HP, 50–200k km)
-- Vehicles from 2010–2024
+**Best accuracy for:**
+- Mass-market brands (VW, Toyota, Ford, Opel, Skoda, Kia, Hyundai)
+- Standard configurations: 100-300 HP, 50-200k km, 2010-2024
 
-⚠️ **Lower accuracy for:**
-- Luxury brands (Ferrari, Lamborghini, Rolls-Royce)
+**Reduced accuracy for:**
+- Luxury / exotic brands (Ferrari, Lamborghini, Rolls-Royce)
 - Vintage cars (> 30 years old)
-- Rare models (< 20 entries in the dataset)
-- Custom factory modifications not captured in features
+- Rare models (< 20 examples in the dataset)
+- Custom factory configurations not captured by standard features
 
 ---
 
-### 🛠️ Tech Stack
+### Tech Stack
 
-- **ML:** XGBoost, scikit-learn, category-encoders
-- **Optimisation:** Optuna (Bayesian search)
-- **Data processing:** Pandas, NumPy
-- **Deployment:** Streamlit, Hugging Face Hub
-- **Visualisations:** Plotly, Folium
+- **ML:** XGBoost 2.0, scikit-learn, category-encoders
+- **Optimisation:** Optuna (TPE Sampler, Bayesian search)
+- **Data:** Pandas, NumPy, scraped from Otomoto
+- **Deployment:** Streamlit >= 1.43, Hugging Face Hub, Docker
+- **Visualisations:** Plotly, Folium, Matplotlib / Seaborn
 """)
 
+
+# ---------------------------------------------------------------------------
+# Router
+# ---------------------------------------------------------------------------
+
 page = st.session_state.page
-if page == 'home':
-    home_page()
-elif page == 'predict':
-    predict_page()
-elif page == 'regional':
-    regional_page()
-elif page == 'visualizations':
-    visualizations_page()
-elif page == 'info':
-    info_page()
+if   page == "home":           home_page()
+elif page == "predict":        predict_page()
+elif page == "regional":       regional_page()
+elif page == "visualizations": visualizations_page()
+elif page == "info":           info_page()

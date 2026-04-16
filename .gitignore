@@ -16,7 +16,6 @@ env/
 *.parquet
 data/
 datasets/
-models/
 
 *.pkl
 *.joblib

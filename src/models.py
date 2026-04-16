@@ -23,7 +23,7 @@ from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 
-from .features import get_preprocessor_mastered, get_preprocessor_tree
+from .features import get_preprocessor_mastered, get_preprocessor_tree, get_preprocessor_v2
 from .config import RANDOM_STATE, print_if_verbose
 
 def get_log_transformed_target(
@@ -153,8 +153,8 @@ def train_ridge_grid_search(
     print_if_verbose("Starting GridSearch...")
     grid.fit(X_train, y_train_log)
     
-    print_if_verbose(f"\n✓ Best parameters: {grid.best_params_}")
-    print_if_verbose(f"✓ Best CV RMSE: {-grid.best_score_:,.2f}")
+    print_if_verbose(f"\n[OK] Best parameters: {grid.best_params_}")
+    print_if_verbose(f"[OK] Best CV RMSE: {-grid.best_score_:,.2f}")
     print_if_verbose("="*80)
     
     return grid.best_estimator_
@@ -233,8 +233,8 @@ def train_random_forest_search(
     print_if_verbose("Starting RandomizedSearch...")
     random_search.fit(X_train_clean, y_train)
     
-    print_if_verbose(f"\n✓ Best parameters: {random_search.best_params_}")
-    print_if_verbose(f"✓ Best CV MAE: {-random_search.best_score_:,.2f} PLN")
+    print_if_verbose(f"\n[OK] Best parameters: {random_search.best_params_}")
+    print_if_verbose(f"[OK] Best CV MAE: {-random_search.best_score_:,.2f} PLN")
     print_if_verbose("="*80)
     
     return random_search.best_estimator_
@@ -336,8 +336,8 @@ def train_xgboost_optuna(
     
     best_params = study.best_params
     
-    print_if_verbose(f"\n✓ Best trial RMSE: {study.best_value:.4f}")
-    print_if_verbose(f"✓ Best parameters: {best_params}")
+    print_if_verbose(f"\n[OK] Best trial RMSE: {study.best_value:.4f}")
+    print_if_verbose(f"[OK] Best parameters: {best_params}")
     
     print_if_verbose("\nTraining final model on full training set...")
     
@@ -356,111 +356,95 @@ def train_xgboost_optuna(
     
     return pipeline
 
-def get_brand_reliability_category(brand: str) -> str:
+def get_brand_tier(brand: str) -> str:
     """
-    Categorize car brands by market segment.
-    
-    Categories help identify segments where model struggles:
-    - Vintage: Old Polish/Soviet cars (rare, unpredictable prices)
-    - Luxury: Exotic supercars (few samples, high variance)
-    - American: US brands (different depreciation patterns)
-    - Budget: Economy brands (stable, well-represented)
-    - Standard: Mainstream brands (most data)
-    
+    Classify a vehicle brand into one of five market tiers.
+
+    Matches the notebook's tier system used for sample weighting
+    and the Brand_tier feature.
+
     Parameters
     ----------
     brand : str
         Car brand name
-        
+
     Returns
     -------
     str
-        Category: Vintage/Luxury/American/Budget/Standard
+        One of: Ultra_Luxury, Luxury, Premium, Mass_Market, Niche
     """
-    brand_lower = str(brand).lower()
-    
-    luxury = [
-        'ferrari', 'lamborghini', 'rolls-royce', 'bentley', 
-        'aston martin', 'porsche', 'maserati', 'mclaren', 'lotus'
-    ]
-    american = ['ram', 'dodge', 'chevrolet', 'cadillac', 'hummer', 'jeep']
-    vintage = [
-        'syrena', 'nysa', 'warszawa', 'polonez', 'żuk', 
-        'gaz', 'moskwicz', 'lada', 'trabant', 'wartburg'
-    ]
-    budget = ['dacia', 'fiat', 'daewoo', 'lancia', 'tata']
-    
+    brand_lower = str(brand).strip().lower()
+
+    ultra_luxury = {
+        'ferrari', 'lamborghini', 'rolls-royce', 'bentley', 'mclaren',
+        'bugatti', 'koenigsegg', 'pagani', 'aston martin', 'maybach',
+    }
+    luxury = {
+        'mercedes-benz', 'bmw', 'audi', 'porsche', 'lexus', 'jaguar',
+        'maserati', 'tesla', 'land rover', 'infiniti', 'lincoln',
+        'genesis', 'cadillac', 'volvo',
+    }
+    premium = {
+        'alfa romeo', 'mini', 'saab', 'ds automobiles', 'cupra',
+        'alpine', 'lotus', 'subaru', 'acura', 'baic', 'ssangyong',
+    }
+    mass_market = {
+        'volkswagen', 'toyota', 'ford', 'hyundai', 'kia', 'honda',
+        'opel', 'chevrolet', 'peugeot', 'renault', 'seat', 'skoda',
+        'fiat', 'nissan', 'mazda', 'mitsubishi', 'suzuki', 'dacia',
+        'citroen', 'citroën', 'dodge', 'ram', 'jeep', 'chrysler',
+        'lancia', 'daewoo', 'lada',
+    }
+
+    if brand_lower in ultra_luxury:
+        return 'Ultra_Luxury'
     if brand_lower in luxury:
         return 'Luxury'
-    if brand_lower in american:
-        return 'American'
-    if brand_lower in vintage:
-        return 'Vintage'
-    if brand_lower in budget:
-        return 'Budget'
-    
-    return 'Standard'
+    if brand_lower in premium:
+        return 'Premium'
+    if brand_lower in mass_market:
+        return 'Mass_Market'
+    return 'Niche'
 
 
 def calculate_sample_weights(X_train: pd.DataFrame) -> np.ndarray:
     """
     Calculate sample weights to handle imbalanced market segments.
-    
-    Strategy:
-    - Upweight rare/difficult segments (vintage, luxury)
-    - Downweight very rare brands (< 20 listings)
-    - Keep standard brands at weight 1.0
-    
-    This helps model learn better on underrepresented segments
-    without being dominated by common mass-market cars.
-    
+
+    Uses the 5-tier brand system (Ultra_Luxury / Luxury / Premium /
+    Mass_Market / Niche) consistent with the notebook and the
+    Brand_tier feature.  Rare and luxury segments receive higher
+    weights so the model allocates more capacity to them.
+
     Parameters
     ----------
     X_train : pd.DataFrame
         Training features with 'Vehicle_brand' column
-        
+
     Returns
     -------
     np.ndarray
         Sample weights (same length as X_train)
-        
-    Examples
-    --------
-    >>> weights = calculate_sample_weights(X_train)
-    >>> # Use in model training:
-    >>> model.fit(X_train, y_train, sample_weight=weights)
     """
     X_train = X_train.copy()
-    
-    X_train['Brand_category'] = X_train['Vehicle_brand'].apply(
-        get_brand_reliability_category
-    )
-    
-    brand_freq = X_train['Vehicle_brand'].value_counts().to_dict()
-    X_train['Brand_frequency'] = X_train['Vehicle_brand'].map(brand_freq)
-    
-    weight_map = {
-        'Vintage': 1.5,   
-        'Luxury': 1.2,    
-        'American': 1.2, 
-        'Budget': 1.1,   
-        'Standard': 1.0   
+
+    X_train['Brand_tier'] = X_train['Vehicle_brand'].apply(get_brand_tier)
+
+    tier_weight_map = {
+        'Ultra_Luxury': 4.0,
+        'Luxury':       3.0,
+        'Niche':        3.5,
+        'Premium':      1.5,
+        'Mass_Market':  1.0,
     }
-    
-    weights = np.ones(len(X_train))
-    
-    for category, weight in weight_map.items():
-        mask = X_train['Brand_category'] == category
-        weights[mask] = weight
-    
-    rare_mask = X_train['Brand_frequency'] < 20
-    weights[rare_mask] = np.minimum(weights[rare_mask] * 0.5, 0.5)
-    
-    print_if_verbose(f"\n✓ Sample weights calculated:")
-    print_if_verbose(f"  Vintage cars: {(X_train['Brand_category'] == 'Vintage').sum()}")
-    print_if_verbose(f"  Luxury cars: {(X_train['Brand_category'] == 'Luxury').sum()}")
-    print_if_verbose(f"  Rare brands (<20): {rare_mask.sum()}")
-    
+
+    weights = X_train['Brand_tier'].map(tier_weight_map).fillna(2.0).values
+
+    print_if_verbose("\n[OK] Sample weights calculated:")
+    for tier, w in tier_weight_map.items():
+        n = (X_train['Brand_tier'] == tier).sum()
+        print_if_verbose(f"  {tier:<15}: weight={w:.1f}  n={n:,}")
+
     return weights
 
 
@@ -472,16 +456,13 @@ def train_xgboost_weighted(
     """
     Train XGBoost with sample weighting and Optuna optimization.
     
-    This is the final production model that:
-    - Uses Bayesian optimization (Optuna)
-    - Applies sample weights for rare segments
-    - Includes strong regularization
-    - Uses early stopping
+    Uses preprocessor_v2 (StandardScaler + TargetEncoder + OneHotEncoder)
+    with brand-level features, matching the notebook's tuned v2 model.
     
     Parameters
     ----------
     X_train : pd.DataFrame
-        Training features
+        Training features (must include Brand_tier, Brand_frequency, etc.)
     y_train_log : pd.Series
         Log-transformed training target
     n_trials : int, default=50
@@ -491,13 +472,6 @@ def train_xgboost_weighted(
     -------
     Pipeline
         Production-ready XGBoost pipeline
-        
-    Notes
-    -----
-    This model achieves:
-    - R² = 0.926
-    - MAPE = 17.2%
-    - Good balance between accuracy and generalization
     """
     print_if_verbose("\n" + "="*80)
     print_if_verbose("TRAINING FINAL XGBOOST WITH SAMPLE WEIGHTING")
@@ -505,7 +479,7 @@ def train_xgboost_weighted(
     
     weights = calculate_sample_weights(X_train)
     
-    preprocessor = get_preprocessor_tree()
+    preprocessor = get_preprocessor_v2(smoothing=300)
     
     def objective(trial):
         """Optuna objective with sample weights"""
@@ -556,8 +530,8 @@ def train_xgboost_weighted(
     
     best_params = study.best_params
     
-    print_if_verbose(f"\n✓ Best trial weighted RMSE: {study.best_value:.4f}")
-    print_if_verbose(f"✓ Best parameters: {best_params}")
+    print_if_verbose(f"\n[OK] Best trial weighted RMSE: {study.best_value:.4f}")
+    print_if_verbose(f"[OK] Best parameters: {best_params}")
     
     print_if_verbose("\nTraining final weighted model on full training set...")
     

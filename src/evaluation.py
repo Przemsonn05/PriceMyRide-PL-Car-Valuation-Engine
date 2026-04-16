@@ -166,7 +166,7 @@ def plot_regression_diagnostics(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -237,7 +237,7 @@ def plot_residuals_vs_age(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -314,7 +314,7 @@ def plot_mape_by_brand(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -363,7 +363,7 @@ def plot_ridge_coefficients(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -426,7 +426,7 @@ def plot_tree_feature_importance(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -517,7 +517,7 @@ def plot_learning_curves(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig
 
@@ -543,9 +543,9 @@ def create_model_comparison_plot(
     Examples
     --------
     >>> metrics = {
-    ...     'Ridge': {'R2': 0.831, 'RMSE': 34358, 'MAE': 14798, 'MAPE': 0.293},
-    ...     'RF': {'R2': 0.938, 'RMSE': 20850, 'MAE': 7400, 'MAPE': 0.200},
-    ...     'XGB': {'R2': 0.926, 'RMSE': 22918, 'MAE': 8062, 'MAPE': 0.172}
+    ...     'Ridge': {'R2': 0.724, 'RMSE': 69707, 'MAE': 19355, 'MAPE': 0.285},
+    ...     'RF': {'R2': 0.922, 'RMSE': 37185, 'MAE': 13097, 'MAPE': 0.228},
+    ...     'XGB': {'R2': 0.930, 'RMSE': 35170, 'MAE': 11900, 'MAPE': 0.186}
     ... }
     >>> fig = create_model_comparison_plot(metrics)
     """
@@ -593,6 +593,6 @@ def create_model_comparison_plot(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print_if_verbose(f"✓ Saved plot: {save_path}")
+        print_if_verbose(f"[OK] Saved plot: {save_path}")
     
     return fig

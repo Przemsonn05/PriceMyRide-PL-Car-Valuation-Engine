@@ -21,7 +21,7 @@ This project demonstrates a complete **machine learning workflow**: data preproc
 1. **Data loading & preprocessing** — collect, load, and clean raw vehicle listings from Polish online car sales platforms.
 2. **Exploratory Data Analysis (EDA)** — analyze feature distributions, detect anomalies and outliers, generate visual insights.
 3. **Feature engineering** — handle missing values, encode categorical variables, create derived features, remove extreme outliers.
-4. **Model experimentation** — evaluate multiple approaches: linear baseline → Random Forest → optimized XGBoost.
+4. **Model experimentation** — evaluate multiple approaches: Ridge baseline → Random Forest → optimized XGBoost.
 5. **Hyperparameter tuning** — apply **Optuna** (Bayesian search) to identify optimal model configurations.
 6. **Evaluation & validation** — assess performance using **RMSE, MAE, MAPE, and R²** with residual analysis.
 7. **Error analysis and model refinement** — investigate prediction errors, identify problematic segments, engineer corrective features.
@@ -41,9 +41,9 @@ This project demonstrates a complete **machine learning workflow**: data preproc
 
 ## 📚 Table of Contents
 1. [Dataset](#-dataset)
-2. [Project Structure](#-project-structure)
-3. [Workflow Steps](#-workflow-steps)
-4. [Data Limitations & Inflation Adjustment](#️-data-limitations--inflation-adjustment)
+2. [Data Collection & Updates](#-data-collection--updates)
+3. [Project Structure](#-project-structure)
+4. [Workflow Steps](#-workflow-steps)
 5. [Results & Business Impact](#-results--business-impact)
 6. [Tech Stack](#️-tech-stack)
 7. [Installation & Usage](#-installation--usage)
@@ -54,7 +54,7 @@ This project demonstrates a complete **machine learning workflow**: data preproc
 
 ## 📁 Dataset
 
-The raw dataset is stored in `data/Car_sale_ads.csv` and contains **over 200,000 vehicle listings** scraped from popular Polish automotive marketplaces. The most recent listings in the dataset are from **2021**.
+The dataset is stored in `data/Car_sale_ads_balanced.csv` and contains **~200,000 active car listings** scraped from Otomoto (Poland's largest automotive marketplace). The dataset covers **current market prices (2024–2026)**, collected via a stratified scraping pipeline across 35 brand/fuel-type segments to ensure broad coverage of popular, luxury, and electric vehicles.
 
 Key fields include:
 
@@ -62,11 +62,135 @@ Key fields include:
 |----------|--------|
 | Vehicle information | `brand`, `model`, `year`, `mileage` |
 | Technical specs | `fuel_type`, `power_hp`, `type`, `transmission`, `displacement_cm3`, `colour`, `origin_country`, `doors_number`, `first_owner`, `condition` |
-| Pricing | `price` (target, PLN or EUR), `currency` |
-| Offer details | `registration_date`, `offer_publication_date` |
+| Pricing | `price_PLN` (target, Polish Złoty) |
+| Offer details | `offer_publication_date` |
 | Text attributes | `features`, `offer_location` |
 
-> **Note:** Prices in EUR were converted to PLN using official exchange rates from the National Bank of Poland (NBP) API before any analysis or modeling.
+> **Note:** Only active Otomoto listings are scraped — prices reflect the current Polish car market (2024–2026). No historical or pre-2022 data is used.
+
+---
+
+## 🔄 Data Collection & Updates
+
+### Data Source
+
+Listings are collected from **[Otomoto](https://www.otomoto.pl)** — the largest Polish automotive marketplace — using a custom scraping pipeline built on `requests` and `BeautifulSoup`. The pipeline parses the `__NEXT_DATA__` JSON embedded in Otomoto search pages, which yields up to 32 structured listing records per request without requiring a browser.
+
+> **Historical data note:** Otomoto only exposes *active* listings. Ads from 2021–2024 that are no longer live cannot be scraped retroactively. The original 200,000-row dataset covers that period and remains the training foundation. The update pipeline is designed for **incremental enrichment** going forward.
+
+### Collected Fields
+
+| Raw Otomoto Field | Schema Column | Notes |
+|-------------------|---------------|-------|
+| `make` | `Vehicle_brand` | Direct |
+| `model` | `Vehicle_model` | Direct |
+| `version` / `generation` | `Vehicle_generation` | Combined |
+| `year` | `Production_year` | Numeric |
+| `mileage` | `Mileage_km` | Parsed from "55 005 km" |
+| `engine_capacity` | `Displacement_cm3` | Parsed from "1 984 cm3" |
+| `engine_power` | `Power_HP` | Parsed from "272 KM" |
+| `fuel_type` | `Fuel_type` | Polish → English translation |
+| `gearbox` | `Transmission` | Polish → English translation |
+| `transmission` | `Drive` | Polish → English translation |
+| `body_type` | `Type` | Polish → English translation |
+| `door_count` | `Doors_number` | Numeric |
+| `color` | `Colour` | Polish → English translation |
+| `new_used` | `Condition` | Polish → English translation |
+| `country_origin` | `Origin_country` | Polish → English translation |
+| `original_owner` | `First_owner` | Binary (0/1) |
+| `price` | `price_PLN` | PLN; EUR converted via NBP API |
+| `createdAt` | `Offer_publication_date` | dd/mm/yyyy |
+| `location.city` | `Offer_location` | City name |
+| equipment keys | `Features` | Comma-separated feature labels |
+
+### Update Mechanism
+
+The pipeline performs **incremental updates**: only listings whose Otomoto offer ID is not already present in the dataset are appended. This prevents duplicate records across runs.
+
+```bash
+# Fetch ~320 new listings (10 pages × 32)
+python main.py --mode update --pages 10
+
+# Full detail mode — fetches individual listing pages for Drive, Colour, etc.
+python main.py --mode update --pages 5 --detail
+
+# Test with synthetic data (no network required)
+python main.py --mode update --mock
+```
+
+You can also run updates programmatically:
+
+```python
+from src.data_fetcher import fetch_incremental
+
+new_rows = fetch_incremental(
+    data_path="data/Car_sale_ads_balanced.csv",
+    pages=20,            # ~640 listings
+    detail_mode=True,    # fetch full field coverage
+)
+print(f"Appended {len(new_rows)} new listings")
+```
+
+### Rate Limiting & Robustness
+
+- Random delay between requests (1.5–3.5 s) to avoid triggering rate limits
+- Automatic retry with exponential back-off on HTTP 429/5xx responses
+- Graceful degradation: scraping failures are logged and skipped, not fatal
+
+### Stratified / Balanced Collection
+
+A plain incremental scrape over-represents common brands (Volkswagen, Toyota, Opel)
+and under-represents rare but analytically important segments (luxury brands, electric
+vehicles). The `--mode collect` pipeline addresses this by fetching each segment
+separately, then resampling to a target distribution.
+
+**Segment allocation (default `--target-rows 120000`):**
+
+| Segment | Filter | Target share | Examples |
+|---------|--------|:------------:|----------|
+| Popular brands | per-brand make filter | 65 % | VW, Toyota, BMW, Audi, Skoda … |
+| Luxury / rare | per-brand make filter | 15 % | Porsche, Ferrari, Bentley, Maserati … |
+| Electric vehicles | `fuel_type=electric` | 20 % | Tesla, BMW i, VW ID, Hyundai IONIQ … |
+
+> Luxury and EV categories have fewer than ~4 000 Otomoto listings each.
+> Available rows are used in full; popular brands fill the remaining quota.
+
+```bash
+# Collect 120 000 balanced listings (long-running, ~5–8 hours)
+python main.py --mode collect --target-rows 120000
+
+# Full detail coverage (adds Drive, Colour, body type via individual page fetches)
+python main.py --mode collect --target-rows 120000 --detail
+
+# Dry run with synthetic data (instant, tests the full pipeline)
+python main.py --mode collect --target-rows 120000 --mock
+```
+
+Programmatic usage:
+
+```python
+from src.data_fetcher import fetch_balanced_dataset, STRATIFIED_CONFIG
+from src.data_cleaning import clean_data, apply_stratified_sampling, validate_schema
+
+# 1. Fetch across all segments
+df_raw = fetch_balanced_dataset(target_rows=120_000)
+
+# 2. Normalize and clean
+df_clean = clean_data(df_raw.drop(columns=["_category"]))
+
+# 3. Balance final dataset
+df_balanced = apply_stratified_sampling(df_clean, target_rows=120_000,
+                                         electric_frac=0.20, luxury_frac=0.15)
+
+# 4. Validate schema
+result = validate_schema(df_balanced)
+print(result["valid"], result["issues"])
+
+# 5. Save
+df_balanced.to_csv("data/Car_sale_ads_balanced.csv", index=False)
+```
+
+Output is saved to `data/Car_sale_ads_balanced.csv` by default.
 
 ---
 
@@ -74,15 +198,20 @@ Key fields include:
 
 ```
 ├── data/
-│   └── Car_sale_ads.csv
+│   ├── Car_sale_ads_balanced.csv     # primary dataset: ~200k scraped Otomoto listings (2024-2026)
 ├── images/
 ├── models/
 ├── notebooks/
 ├── reports/
 │   └── model_evaluation_report.txt
 ├── src/
+│   ├── __init__.py
 │   ├── config.py
 │   ├── data.py
+│   ├── data_cleaning.py      # normalize_columns(), clean_data(), deduplicate(),
+│   │                         # validate_schema(), apply_stratified_sampling()
+│   ├── data_fetcher.py       # fetch_data(), fetch_incremental(),
+│   │                         # fetch_balanced_dataset(), STRATIFIED_CONFIG
 │   ├── evaluation.py
 │   ├── features.py
 │   ├── models.py
@@ -220,11 +349,13 @@ Feature engineering was one of the most impactful stages of the project. The goa
 
 | Feature | Type | Description |
 |---------|------|-------------|
-| `mileage_per_year`, `usage_intensity` | Operational | Distinguishes highway vs city usage patterns for same-age vehicles — two cars with identical mileage but different ages represent very different depreciation profiles |
-| `hp_per_liter` | Performance ratio | Captures modern turbo efficiency vs older naturally-aspirated engines; decouples raw displacement from actual performance output |
-| `is_premium`, `is_supercar` | Binary flags | Brand prestige and power thresholds — signals luxury pricing dynamics that cannot be learned from continuous technical specs alone |
+| `Mileage_per_year`, `Usage_intensity` | Operational | Distinguishes highway vs city usage patterns for same-age vehicles — two cars with identical mileage but different ages represent very different depreciation profiles. `Usage_intensity` is a categorical binning (Low / Medium / High / Very_High) derived from `Mileage_per_year`. |
+| `HP_per_liter` | Performance ratio | Captures modern turbo efficiency vs older naturally-aspirated engines; decouples raw displacement from actual performance output |
+| `Is_premium`, `Is_supercar` | Binary flags | Brand prestige and power thresholds — signals luxury pricing dynamics that cannot be learned from continuous technical specs alone |
 | `is_collector` | Binary flag | Vintage vehicles where rarity drives value more than utility; prevents the model from applying standard depreciation logic to cars where the pricing mechanism is fundamentally different |
-| `age_category` | Segmentation | Lifecycle stages: New / Standard / Old / Vintage — encodes the structural phases identified in the EDA depreciation curve into an explicit categorical signal |
+| `Age_category` | Segmentation | Lifecycle stages: New / Standard / Old / Vintage — encodes the structural phases identified in the EDA depreciation curve into an explicit categorical signal |
+| `Brand_tier` | Market segment | Five-tier brand classification (Ultra_Luxury / Luxury / Premium / Mass_Market / Niche) used for sample weighting and as a categorical feature — captures price-level differences driven by brand positioning |
+| `Rarity_index`, `Brand_popularity` | Market context | `Rarity_index` is a log-normalized inverse of brand frequency; `Brand_popularity` is a categorical binning (Popular / Common / Uncommon / Rare / Ultra_Rare) — helps the model differentiate pricing dynamics for under-represented brands |
 
 #### Non-Linear & Interaction Features
 
@@ -235,13 +366,17 @@ Feature engineering was one of the most impactful stages of the project. The goa
 #### Preprocessing Pipeline
 
 ```
-ColumnTransformer
-├── Numerical → Median imputation → StandardScaler
+ColumnTransformer (base XGBoost)
+├── Numerical → Median imputation (SimpleImputer)
+└── Categorical → Constant imputation ("missing") → OrdinalEncoder
+
+ColumnTransformer (tuned XGBoost)
+├── Numerical → StandardScaler
 ├── Low-cardinality categorical → OneHotEncoder
-└── High-cardinality categorical → TargetEncoder (smoothing=500)
+└── High-cardinality categorical → TargetEncoder (smoothing=300)
 ```
 
-The choice of `TargetEncoder` for high-cardinality features like `model` (hundreds of unique values) is deliberate: one-hot encoding would produce a sparse, extremely wide feature matrix, while label encoding loses ordinal meaning. Target encoding replaces each category with a smoothed estimate of the mean target value — effectively teaching the model what each specific brand/model combination is worth on average, without blowing up the feature space. The smoothing factor of 500 prevents overfitting to rare vehicle models represented by very few listings.
+The choice of `TargetEncoder` for high-cardinality features like `model` (hundreds of unique values) is deliberate: one-hot encoding would produce a sparse, extremely wide feature matrix, while label encoding loses ordinal meaning. Target encoding replaces each category with a smoothed estimate of the mean target value — effectively teaching the model what each specific brand/model combination is worth on average, without blowing up the feature space. The smoothing factor of 300 prevents overfitting to rare vehicle models represented by very few listings.
 
 > All transformations are fitted **only on training data** and applied to the test set — no data leakage.
 
@@ -257,36 +392,36 @@ Before diving into model results, it is worth clarifying what each metric actual
 
 | Metric | Interpretation for Car Pricing |
 |--------|-------------------------------|
-| **R²** | Proportion of price variance explained by the model. R² = 0.94 means the model accounts for 94% of the variation in prices across all vehicles — the remaining 6% is due to factors not captured in the data (e.g., vehicle history, negotiation, cosmetic condition). |
-| **MAE** (Mean Absolute Error) | Average absolute prediction error in PLN. MAE = 8,000 PLN means predictions are off by 8,000 PLN on average — regardless of whether the car costs 20,000 or 200,000 PLN. Intuitive but treats all errors equally regardless of price level. |
+| **R²** | Proportion of price variance explained by the model. R² = 0.93 means the model accounts for 93% of the variation in prices across all vehicles — the remaining 7% is due to factors not captured in the data (e.g., vehicle history, negotiation, cosmetic condition). |
+| **MAE** (Mean Absolute Error) | Average absolute prediction error in PLN. MAE = 12,000 PLN means predictions are off by 12,000 PLN on average — regardless of whether the car costs 20,000 or 200,000 PLN. Intuitive but treats all errors equally regardless of price level. |
 | **RMSE** (Root Mean Squared Error) | Similar to MAE but penalizes large errors more heavily due to squaring. RMSE > MAE always; a large gap between the two indicates the model struggles with certain outlier-prone segments (vintage, supercar). |
-| **MAPE** (Mean Absolute Percentage Error) | Scale-independent error as a percentage of actual price. MAPE = 17% means predictions deviate by 17% on average relative to the actual price — a 100,000 PLN car would be predicted within ±17,000 PLN. Most business-interpretable metric for comparing across price segments. |
+| **MAPE** (Mean Absolute Percentage Error) | Scale-independent error as a percentage of actual price. MAPE = 18.6% means predictions deviate by ~19% on average relative to the actual price — a 100,000 PLN car would be predicted within ±19,000 PLN. Most business-interpretable metric for comparing across price segments. |
 
 ---
 
-#### Model 1 — Linear Regression (Baseline)
+#### Model 1 — Ridge Regression (Baseline)
 
-| Metric | Value |
-|--------|-------|
-| R² | 83.1% |
-| MAE | 14,798 PLN |
-| RMSE | 34,358 PLN |
-| MAPE | 29.3% |
+| Metric | Train | Test |
+|--------|-------|------|
+| R² | 72.7% | 72.4% |
+| MAE | 19,247 PLN | 19,355 PLN |
+| RMSE | 70,721 PLN | 69,707 PLN |
+| MAPE | 28.4% | 28.5% |
 
-The linear regression baseline establishes the performance floor and confirms what the EDA already suggested: **car depreciation is not a linear process**. An R² of 83.1% sounds reasonable in isolation, but the MAE of nearly 15,000 PLN and MAPE of 29.3% translate to predictions that are commercially unusable — a car worth 50,000 PLN could be priced anywhere between 35,000 and 65,000 PLN. The model fails particularly hard on vehicles at the extremes of the age and price distribution, where the non-linear depreciation curve deviates most from any linear approximation. This baseline serves as a reference floor — every subsequent model is evaluated against this starting point.
+The Ridge regression baseline establishes the performance floor and confirms what the EDA already suggested: **car depreciation is not a linear process**. An R² of 72.4% reveals that a linear model can only capture about three quarters of the price variance. The MAE of over 19,000 PLN and MAPE of 28.5% translate to predictions that are commercially unusable — a car worth 50,000 PLN could be priced anywhere between 36,000 and 64,000 PLN. The model fails particularly hard on vehicles at the extremes of the age and price distribution, where the non-linear depreciation curve deviates most from any linear approximation. This baseline serves as a reference floor — every subsequent model is evaluated against this starting point.
 
 ---
 
 #### Model 2 — Random Forest
 
-| Metric | Value |
-|--------|-------|
-| R² | 93.8% |
-| MAE | 8,410 PLN |
-| RMSE | 20,799 PLN |
-| MAPE | 20.0% |
+| Metric | Train | Test |
+|--------|-------|------|
+| R² | 92.2% | 92.2% |
+| MAE | 10,064 PLN | 13,097 PLN |
+| RMSE | 37,770 PLN | 37,185 PLN |
+| MAPE | 17.7% | 22.8% |
 
-Switching to Random Forest delivered substantial gains across all metrics: MAE dropped by ~43% and MAPE fell from 29.3% to 20.0%. This confirms that **non-linear decision boundaries** are essential for this problem — the model now captures depreciation thresholds (e.g., the sharp price drop when a car crosses 100,000 km or 10 years of age) that linear regression missed entirely. The R² of 93.8% represents a meaningful improvement in explained variance. However, the remaining MAPE of 20% still represents significant commercial uncertainty — a car priced at 80,000 PLN could be predicted anywhere within a ±16,000 PLN window. The Random Forest also struggled with luxury and vintage segments where training examples are scarce: without enough examples to form reliable decision trees in those regions, the model defaults to regression toward the mean, systematically underestimating high-value vehicles. This limitation motivated the move to gradient boosting.
+Switching to Random Forest delivered substantial gains across all metrics: test MAE dropped by ~32% and MAPE fell from 28.5% to 22.8%. This confirms that **non-linear decision boundaries** are essential for this problem — the model now captures depreciation thresholds (e.g., the sharp price drop when a car crosses 100,000 km or 10 years of age) that Ridge regression missed entirely. The R² of 92.2% represents a meaningful improvement in explained variance (+20 pp). However, the remaining MAPE of 22.8% still represents significant commercial uncertainty — a car priced at 80,000 PLN could be predicted anywhere within a ±18,000 PLN window. The gap between train MAPE (17.7%) and test MAPE (22.8%) suggests mild overfitting. The Random Forest also struggled with luxury and vintage segments where training examples are scarce: without enough examples to form reliable decision trees in those regions, the model defaults to regression toward the mean, systematically underestimating high-value vehicles. This limitation motivated the move to gradient boosting.
 
 ---
 
@@ -294,14 +429,14 @@ Switching to Random Forest delivered substantial gains across all metrics: MAE d
 
 | Metric | Train | Test |
 |--------|-------|------|
-| R² | 92.5% | 94.1% |
-| RMSE | 24,494 PLN | 19,982 PLN |
-| MAE | 6,711 PLN | 7,928 PLN |
-| MAPE | 13.4% | 16.8% |
+| R² | 94.3% | 93.0% |
+| RMSE | 32,205 PLN | 35,170 PLN |
+| MAE | 9,727 PLN | 11,900 PLN |
+| MAPE | 14.8% | 18.6% |
 
-The base XGBoost model achieves the best overall performance across all metrics and was selected for production deployment. The MAE of 7,928 PLN represents a 45.5% reduction compared to the linear baseline and a ~6% improvement over Random Forest. The MAPE of 16.8% means the model is commercially usable for most vehicle segments — on a 60,000 PLN car, predictions are within approximately ±10,000 PLN on average, which aligns with the natural price spread visible on marketplaces like Otomoto for similar specifications.
+The base XGBoost model achieves the best overall test R² across all models and was selected for production deployment. The test MAE of 11,900 PLN represents a ~38% reduction compared to the Ridge baseline and a ~9% improvement over Random Forest. The MAPE of 18.6% means the model is commercially usable for most vehicle segments — on a 60,000 PLN car, predictions are within approximately ±11,000 PLN on average, which aligns with the natural price spread visible on marketplaces like Otomoto for similar specifications.
 
-One notable observation is that test R² (94.1%) is marginally higher than train R² (92.5%). This is unusual but explainable: the test split likely captured proportionally fewer extreme outliers (luxury and vintage vehicles), resulting in a slightly easier prediction problem on average. There are no signs of overfitting — training and test RMSE are within ~4,500 PLN of each other, well within normal variance.
+Train R² (94.3%) is higher than test R² (93.0%), with a moderate gap that indicates the model generalizes well without significant overfitting. The RMSE gap between train and test (~3,000 PLN) is within normal variance. The train-to-test MAPE difference (14.8% → 18.6%) is modest for a gradient boosting model on heterogeneous price data.
 
 ##### XGBoost Feature Importance
 
@@ -323,30 +458,30 @@ The feature importance chart above shows the relative contribution of each featu
 
 #### Model 4 — XGBoost (Hyperparameter-Tuned via Optuna)
 
-| Metric | Value |
-|--------|-------|
-| R² | 92.9% |
-| MAE | 8,078 PLN |
-| RMSE | 22,282 PLN |
-| MAPE | 17.2% |
+| Metric | Train | Test |
+|--------|-------|------|
+| R² | 96.3% | 92.3% |
+| MAE | 9,497 PLN | 11,956 PLN |
+| RMSE | 25,863 PLN | 36,852 PLN |
+| MAPE | 15.6% | 19.3% |
 
-This model was developed as an attempt to push beyond the base XGBoost results by combining hyperparameter optimization with additional feature engineering. Three new brand-related features were introduced — `Brand_frequency`, `Brand_category`, and `Brand_popularity` — specifically to help the model differentiate pricing dynamics for niche, rare, and luxury manufacturers that appear infrequently in the training data. Hyperparameter tuning was performed using Optuna with 50+ Bayesian search trials, applying strong regularization via Gamma, Alpha, and Lambda penalties.
+This model was developed as an attempt to push beyond the base XGBoost results by combining hyperparameter optimization with sample weighting and additional feature engineering. Brand-related features — `Brand_tier`, `Rarity_index`, and `Brand_popularity` — were introduced specifically to help the model differentiate pricing dynamics for niche, rare, and luxury manufacturers that appear infrequently in the training data. Sample weights were applied using the five-tier brand system (Ultra_Luxury 4×, Luxury 3×, Niche 3.5×, Premium 1.5×, Mass_Market 1×) to boost under-represented segments. Hyperparameter tuning was performed using Optuna with 80 Bayesian search trials, applying strong regularization via Gamma, Alpha, and Lambda penalties.
 
-Despite this additional engineering effort, all metrics deteriorated slightly compared to the base model. The most likely explanation is that the strong regularization introduced more bias than the variance reduction justified — the base XGBoost already generalized well, and further penalizing model complexity reduced its ability to fit the legitimate non-linear patterns in the data. The additional brand features may also have introduced mild noise: brand popularity is a proxy for segment, which was already captured through `is_premium` and `is_supercar` flags.
+Despite improved training metrics (R² 96.3%), test performance deteriorated compared to the base model (R² 92.3% vs 93.0%). The train-test R² gap of ~4 pp suggests mild overfitting — the additional model capacity captured training-set-specific patterns rather than generalizable price signals. The strong regularization penalties and explicit column selection in the preprocessor (StandardScaler + TargetEncoder) reduced the model's ability to leverage the full feature set that the base model's dynamic column selectors captured. The additional brand features may also have introduced noise: brand popularity is a proxy for segment, which was already captured through `is_premium` and `is_supercar` flags.
 
 ##### SHAP Feature Importance
 
-![SHAP Feature Importance](images/SHAP_feature_importance.png)
+![SHAP Feature Importance](images/SHAP_feature_importance_professional.png)
 
 SHAP (SHapley Additive exPlanations) values provide a more theoretically rigorous measure of feature importance than the split-based XGBoost importance shown above. While split importance counts how often a feature is used in tree splits, SHAP quantifies the average magnitude of each feature's contribution to individual predictions — capturing both direct and indirect effects. This makes SHAP particularly useful for validating that the model's behavior aligns with real-world pricing intuition.
 
 The most influential features align with real-world intuition:
-- **Vehicle Age** (SHAP ≈ 0.55): Dominant predictor by a significant margin, consistent with the depreciation curve from EDA. The high SHAP value means that knowing a car's age moves the model's price estimate substantially — more than any other single input.
-- **Power (HP)** (SHAP ≈ 0.18): Reflects the luxury and performance premium embedded in high-output vehicles. The gap between age and HP confirms that time-based depreciation is the primary pricing mechanism, with technical performance as a secondary modifier.
-- **Vehicle Model** (SHAP ≈ 0.15): Captures brand and model-specific pricing patterns not visible in aggregate statistics — for example, why a 5-year-old Golf and a 5-year-old Audi A4 are priced differently even at the same mileage and power.
-- **Mileage (km)** (SHAP ≈ 0.12): Strong depreciation signal, ranking fourth despite being intuitively important. This reflects the fact that mileage is already partially captured through `mileage_per_year` and the interaction features — its standalone SHAP value is somewhat distributed across related features.
+- **Vehicle Age** (SHAP ≈ 0.35): Dominant predictor by a significant margin, consistent with the depreciation curve from EDA. The high SHAP value means that knowing a car's age moves the model's price estimate substantially — more than any other single input.
+- **Vehicle Model** (SHAP ≈ 0.18): Captures brand and model-specific pricing patterns not visible in aggregate statistics — for example, why a 5-year-old Golf and a 5-year-old Audi A4 are priced differently even at the same mileage and power.
+- **Power (HP)** (SHAP ≈ 0.17): Reflects the luxury and performance premium embedded in high-output vehicles. The gap between age and HP confirms that time-based depreciation is the primary pricing mechanism, with technical performance as a secondary modifier.
+- **Mileage (km)** (SHAP ≈ 0.17): Strong depreciation signal, nearly tied with Power HP. This reflects the fact that mileage is a direct indicator of vehicle wear that affects pricing independently of age.
 
-Vehicle Type and Fuel Type contribute minimally (SHAP 0.01–0.03), confirming that technical performance metrics outweigh body style in price determination for this market.
+Transmission, Displacement, Vehicle Brand, and brand-level features (`BrandModel_frequency`, `Rarity_index`) each contribute measurable SHAP values, confirming that the model uses both technical and market-context features.
 
 **Decision: Base XGBoost (Model 3) selected** — best predictive accuracy with stable generalization. The tuned model's additional complexity did not translate to real-world performance gains on this dataset.
 
@@ -383,86 +518,161 @@ The curves confirm a healthy bias–variance balance:
 
 ![Model Comparison](images/model_comparison.png)
 
-| Model | R² | MAE | MAPE | Decision |
-|-------|----|-----|------|----------|
-| Linear Regression | 83.1% | 14,798 PLN | 29.3% | ❌ Baseline only |
-| Random Forest | 93.8% | 8,410 PLN | 20.0% | ✅ Strong but surpassed |
-| **XGBoost Base** | **94.1%** | **7,928 PLN** | **16.8%** | ⭐ **Selected** |
-| XGBoost Tuned | 92.9% | 8,078 PLN | 17.2% | ⚠️ Slightly worse |
+| Model | R² (Test) | MAE (Test) | MAPE (Test) | Decision |
+|-------|-----------|------------|-------------|----------|
+| Ridge Regression | 72.4% | 19,355 PLN | 28.5% | ❌ Baseline only |
+| Random Forest | 92.2% | 13,097 PLN | 22.8% | ✅ Strong but surpassed |
+| **XGBoost Base** | **93.0%** | **11,900 PLN** | **18.6%** | ⭐ **Selected** |
+| XGBoost Tuned | 92.3% | 11,956 PLN | 19.3% | ⚠️ Slightly worse |
 
 **Conclusions:**
 
-The progression from Linear Regression to XGBoost Base tells a clear story about this problem's nature. The 10+ percentage point jump in R² from linear to tree-based models confirms that non-linearity is not an optional enhancement — it is a fundamental requirement for modeling vehicle depreciation. The move from Random Forest to XGBoost delivered a further improvement in MAE (8,410 → 7,928 PLN) and a more significant drop in MAPE (20.0% → 16.8%), with the gradient boosting framework's ability to iteratively correct residuals proving particularly valuable for the wide price range present in this dataset.
+The progression from Ridge Regression to XGBoost Base tells a clear story about this problem's nature. The 20+ percentage point jump in R² from linear to tree-based models confirms that non-linearity is not an optional enhancement — it is a fundamental requirement for modeling vehicle depreciation. The move from Random Forest to XGBoost delivered a further improvement in MAE (13,097 → 11,900 PLN) and a significant drop in MAPE (22.8% → 18.6%), with the gradient boosting framework's ability to iteratively correct residuals proving particularly valuable for the wide price range present in this dataset.
 
-The Tuned XGBoost result is the most instructive: despite 50+ optimization trials and additional feature engineering, performance regressed slightly across all metrics. This is a reminder that hyperparameter tuning is not a guaranteed improvement — when a model already generalizes well, increased regularization can reduce its capacity to fit legitimate signal. The base XGBoost configuration found the right balance between bias and variance without needing aggressive penalization.
+The Tuned XGBoost result is the most instructive: despite 80 optimization trials, sample weighting, and additional brand-level feature engineering, test performance regressed slightly across all metrics (R² 92.3% vs 93.0%). This is a reminder that hyperparameter tuning is not a guaranteed improvement — when a model already generalizes well, the combination of strong regularization and explicit feature selection can reduce its capacity to fit legitimate signal. The base XGBoost configuration found the right balance between bias and variance without needing aggressive penalization.
 
-For practical deployment, a MAPE of 16.8% and MAE of ~7,900 PLN means the model is well-suited for mass-market vehicle valuation (cars in the 20,000–150,000 PLN range) and can serve as a strong pricing signal for dealerships and private sellers alike. The residual 16.8% error reflects a mix of true model uncertainty, the inherent noise in online listing prices (negotiation margins, seller motivation), and the unmodeled quality of individual vehicles.
-
----
-
-## ⚠️ Data Limitations & Inflation Adjustment
-
-The dataset contains listings up to **2021**. To align predictions with current (2026) market prices, an **age-based inflation factor** is applied automatically in the application. A single flat factor was rejected in favor of segmented adjustment because different vehicle age groups experienced significantly different price dynamics during 2021–2026 — near-new vehicles were heavily affected by the semiconductor shortage and resulting new car delivery delays, while older budget-segment vehicles tracked closer to general CPI.
-
-| Vehicle Age (as of 2021) | Factor | Rationale |
-|--------------------------|--------|-----------|
-| ≤ 3 years (2019–2021) | ×1.45 | Semiconductor crisis 2021–2023 drove near-new prices up 40–60% |
-| 4–8 years (2013–2018) | ×1.37 | Most liquid segment; tracked standard market growth |
-| 9–15 years (2006–2012) | ×1.25 | Budget segment; price-sensitive buyers dampened growth |
-| 16–30 years (1991–2005) | ×1.15 | Niche market; lower demand elasticity, closer to CPI |
-| >30 years (pre-1991) | ×1.05 | Collector market; independent pricing dynamics |
-
-*Sources: autobaza.pl, Otomoto Market Report 2022, magazynauto.pl, NBP CPI data 2021–2026*
-
-Additionally, the Otomoto search link shown after each prediction is adjusted by **+5 years** (2021→2026), so that the listings displayed reflect the **current equivalent age** of the predicted vehicle rather than the original production year. This allows users to directly cross-check the inflation-adjusted prediction against live market listings.
-
-> **Production year cap:** The application limits predictions to vehicles manufactured up to 2021, as these are the only years present in the training data. Predictions for post-2021 vehicles would be extrapolations with no training support.
+For practical deployment, a MAPE of 18.6% and MAE of ~11,900 PLN means the model is well-suited for mass-market vehicle valuation (cars in the 20,000–150,000 PLN range) and can serve as a strong pricing signal for dealerships and private sellers alike. The residual 18.6% error reflects a mix of true model uncertainty, the inherent noise in online listing prices (negotiation margins, seller motivation), and the unmodeled quality of individual vehicles.
 
 ---
 
 ## 🚀 Deployment
 
 - **Model Serialization:** Final model saved with `joblib.dump` and hosted on Hugging Face Hub for versioned storage and reproducibility.
-- **Streamlit App:** Users input vehicle specs and receive real-time price predictions with inflation adjustment, vehicle summary stats, and a direct Otomoto search link.
+- **Streamlit App:** Users input vehicle specs and receive real-time price predictions, vehicle summary stats, and a direct Otomoto search link for comparable listings.
 - **Deployment:** Streamlit Community Cloud (live link at the top of this README).
 - **Docker:** The full application is containerized for reproducible local deployment — see the [Docker section](#-docker) below.
 - **Evaluation report:** Key metrics and model diagnostics saved as `reports/model_evaluation_report.txt`.
 
 ### Application Interface
 
-![App Home](images/st_interface1.png)
+![App Home](images/st_app1.png)
 
-The app contains four sections accessible via sidebar navigation:
-- **Price Prediction** — main valuation tool with inflation-adjusted output and Otomoto link
-- **Regional Market** — interactive map of listing distribution across Poland
-- **Data Visualizations** — EDA charts with explanations
-- **About Model** — model selection rationale, metrics, and limitations
+The application is structured into **five pages** accessible via the sidebar navigation. Each page is designed around a specific user goal — from quick valuation to deep analytical exploration.
 
-![App Map](images/st_interface3.png)
+#### 🏠 Home
+
+The landing page provides an overview of the entire project and acts as a navigation hub.
+
+| Section | Content |
+|---------|---------|
+| **Headline** | Tagline, brief description, and a call-to-action button linking to the valuation form. |
+| **Feature Cards** | Three glass-styled cards summarising the main capabilities: Instant Valuation, Regional Analysis, and Data & Charts. Each card links to the corresponding page. |
+| **Model Performance** | Four metric tiles displaying the production model's key results: R² (93.0%), RMSE (35 170 PLN), MAE (11 900 PLN), and MAPE (18.6%). |
+| **About the Project** | Five-paragraph description covering the full data science lifecycle: data collection from Otomoto, model architecture comparison (Ridge → Random Forest → XGBoost), feature engineering strategy (41 features from 14 raw inputs), and dataset characteristics (200 000+ listings, 2024–2026 prices). |
+| **Tech Stack Cards** | Three cards highlighting the core technology areas: Machine Learning (XGBoost, Optuna, scikit-learn), Data Pipeline (custom scraper, Pandas, NumPy), and Deployment (Streamlit, Docker, Hugging Face Hub). |
+
+---
+
+#### 🔮 Price Prediction
+
+The main valuation tool — users fill out a structured form and receive an instant price estimate.
+
+| Section | Content |
+|---------|---------|
+| **Vehicle Identity** | Brand (60+ brands), Model (free text), Condition (Used/New), Production Year (slider 1915–current), Colour, Country of Origin. |
+| **Engine & Mechanics** | Mileage (slider 0–1 000 000 km), Power (slider 10–1 500 HP), Displacement (slider 0–8 000 cm³), Fuel Type (7 options incl. Electric, Hybrid), Transmission (Manual/Automatic), Body Type (9 categories). |
+| **Additional Information** | First Owner flag, Door count, Location (city), and a free-text field for equipment/features (comma-separated). |
+| **Result Card** | Displays the predicted price in PLN with an estimated ±15% confidence range. Below the card: vehicle age, annual mileage, specific power (HP/L), and market segment tier. |
+| **Otomoto Link** | Auto-generated search URL filtered by brand, model, year range, and price range — opens Otomoto directly with comparable listings. |
+| **Segment Warning** | Displayed for ultra-luxury, vintage (>30 years), or high-performance (>500 HP) vehicles where model accuracy is reduced. |
+
+![App Home](images/st_app2.png)
+
+---
+
+#### 🗺️ Regional Market
+
+Interactive geographic analysis of listing distribution across Poland.
+
+| Section | Content |
+|---------|---------|
+| **Interactive Map** | A Folium dark-themed map with circle markers for 30 Polish cities. Circle size and colour encode the number of listings (green → yellow → orange → red). |
+| **Top 10 Bar Chart** | Plotly bar chart ranking the 10 cities with the most listings, coloured by listing count. |
+| **Urban vs Rural** | Insight card noting that major cities (Warszawa, Kraków, Wrocław) account for over 60% of all listings, with premium brands concentrating in urban centres. |
+| **Regional Trends** | Insight card covering geographic price patterns: higher prices in western Poland, German-import preference in coastal cities, budget-segment dominance in eastern regions. |
+
+![App Home](images/st_app3.png)
+
+---
+
+#### 📊 Visualizations
+
+The most content-rich page, organised into **three tabs** with a total of 12 charts and 8 business insights. Every chart includes an introductory paragraph above and a detailed analytical conclusion below.
+
+**Tab 1 — EDA Insights** (6 charts):
+
+| Chart | Description |
+|-------|-------------|
+| **Price Distribution** | Raw and log-transformed price histograms. Explains right-skewness, the median vs mean gap, and why log transformation is essential for training. |
+| **Value Depreciation Over Time** | Median price vs vehicle age curve. Covers the three depreciation phases: rapid early loss (40–50% in 3 years), stable mid-life decline, and the vintage/collector price recovery after 25 years. |
+| **Mileage vs Price by Vehicle Age** | Scatter plot with four age cohorts. Demonstrates how the same mileage value carries different pricing implications across age groups, justifying the Age_Mileage_interaction feature. |
+| **Median Price — Top 20 Brands** | Horizontal bar chart ranking brands by median listing price. Shows the ~2× gap between German premium brands and the mass-market cluster, and Volkswagen's unique position spanning both segments. |
+| **Price Trends by Fuel Type** | Time series of average price by fuel type across production years. Highlights the EV price surge post-2010, hybrid growth, diesel-gasoline divergence post-2018, and the LPG discount pattern. |
+| **Correlation Heatmap** | Numerical feature correlation matrix. Identifies the strongest predictors (Power_HP r=0.60, Vehicle_age r=-0.45) and multicollinearity patterns that guided feature engineering decisions. |
+
+**Tab 2 — Model Analysis** (6 charts):
+
+| Chart | Description |
+|-------|-------------|
+| **SHAP Feature Importance** | Mean absolute SHAP values for the XGBoost model. Vehicle Age dominates (~0.55), followed by Power HP (~0.18), Vehicle Model (~0.15), and Mileage (~0.12). |
+| **XGBoost Split-Based Importance** | Tree split frequency analysis. Is_new_car (41%) captures the new/used price cliff; Vehicle_age_squared (21%) confirms non-linear depreciation learning; Transmission (10%) reflects the automatic gearbox premium. |
+| **Error Analysis by Vehicle Age** | Residuals plotted by production year. Confirms tight calibration for 2000–2021 mass-market vehicles and identifies the two high-error segments: pre-1980 vintage (RMSE ~59k PLN) and modern supercars. |
+| **Learning Curves** | Training vs validation performance as a function of dataset size. Shows smooth convergence with a plateau beyond ~150 000 samples, indicating the feature set's information ceiling. |
+| **Model Comparison** | Side-by-side metrics for Ridge, Random Forest, XGBoost Base, and XGBoost Weighted. Explains why Base XGBoost was selected (best test MAPE at 18.6%) despite the tuned variant's stronger training metrics. |
+| **Actual vs Predicted Prices** | Scatter plot of predicted vs true prices. Confirms excellent mass-market accuracy along the diagonal and increasing scatter above 300 000 PLN due to limited luxury training data. |
+
+**Tab 3 — Business Insights** (8 insight cards):
+
+| Insight | Key Takeaway |
+|---------|-------------|
+| **The First 3 Years Are the Most Expensive** | 40–50% value loss in years 1–3; buying a 3–4 year old vehicle offers the best value proposition. |
+| **The German Premium Tax** | Mercedes, BMW, Audi carry a 60–80% median price premium over equivalent mass-market vehicles. |
+| **Automatic Transmission Premium** | 8–15% price uplift for automatic gearboxes, strongest in SUVs and premium sedans. |
+| **Electric Vehicles Hold Value Differently** | Lower depreciation in years 1–5 but faster decline after year 8 due to battery concerns; sweet spot at 3–6 years. |
+| **Location Matters** | 10–20% price variation between cities for the same vehicle; sellers in smaller cities benefit from national platform listings. |
+| **The 100 000 km Barrier** | Psychological price drop exceeding the linear mileage-price relationship; listing before this threshold preserves 5–8% of value. |
+| **Equipment Lists Add Value** | Listings with 10+ features sell at 8–12% higher prices; comprehensive descriptions are free and directly impact valuation. |
+| **When to Trust the Model** | Highest accuracy (MAPE < 15%) for mass-market vehicles aged 3–15 years with 30k–200k km; use expert appraisal for luxury/vintage segments. |
+
+---
+
+#### 🧠 About Model
+
+Technical documentation of the model architecture, designed for users who want to understand the methodology.
+
+| Section | Content |
+|---------|---------|
+| **Model Overview** | Brief description of the XGBoost pipeline and its purpose. |
+| **Why XGBoost?** | Comparison table (Ridge vs Random Forest vs XGBoost) with key advantages: sequential boosting, robustness to noise, fast inference, L1/L2 regularisation. |
+| **Feature Set** | Full list of 41 features split into 14 raw inputs and 27 engineered features, with descriptions for each derived feature. |
+| **Final Results** | R² 93.0%, RMSE 35 170 PLN, MAE 11 900 PLN, MAPE 18.6% — with plain-language interpretations. |
+| **Training Pipeline** | Seven-step process: data collection → preprocessing → feature engineering → model selection → hyperparameter tuning → validation → deployment. |
+| **Limitations** | Explicit accuracy boundaries: best for mass-market (100–300 HP, 50–200k km, 2010–2024); reduced for luxury, vintage, and rare models. |
+| **Tech Stack** | XGBoost 2.0, scikit-learn, Optuna, Pandas, Streamlit, Docker, Hugging Face Hub, Plotly, Folium. |
 
 ---
 
 ### Example Prediction — Hyundai i20
 
-![Hyundai i20 Input](images/st_interface5.png)
+![Hyundai i20 Input](images/st_app4.png)
 
-Comparable vehicles on the Polish market (similar year, mileage, power) typically sell between **30,000–40,000 PLN**. The model's prediction falls within this range, confirming strong performance for mass-market vehicles.
+Comparable vehicles on the Polish market (similar year, mileage, power) typically sell between **16,000–21,000 PLN**. The model's prediction falls within this range, confirming strong performance for mass-market vehicles.
 
-![Hyundai i20 Result](images/st_interface6.png)
+![Hyundai i20 Input](images/st_app5.png)
 
 ---
 
 ### Example Prediction — Mercedes-Benz C-Class
 
-![Mercedes Input](images/st_interface7.png)
+![Mercedes Input](images/st_app6.png)
 
-The model estimates approximately **132,000 PLN** — consistent with current Otomoto listings for comparable C-Class specifications from around 2023.
+The model estimates approximately **131,200 PLN** — consistent with current Otomoto listings for comparable C-Class specifications from around 2022.
 
-![Mercedes Result](images/st_interface8.png)
+![Mercedes Result](images/st_app7.png)
 
 The Otomoto link is automatically generated with filters matching the predicted vehicle's adjusted year, mileage range, and price range — allowing users to immediately validate the prediction against real market listings.
 
-![Otomoto Link](images/st_interface10.png)
+![Otomoto Link](images/st_app8.png)
 
 ---
 
@@ -472,9 +682,9 @@ The Otomoto link is automatically generated with filters matching the predicted 
 
 | Improvement vs Baseline | Value |
 |-------------------------|-------|
-| MAE reduction | **45.5%** (14,798 → 7,928 PLN) |
-| MAPE reduction | **42.7%** (29.3% → 16.8%) |
-| R² improvement | +11.2 pp (83.1% → 94.3%) |
+| MAE reduction | **38.5%** (19,355 → 11,900 PLN) |
+| MAPE reduction | **34.7%** (28.5% → 18.6%) |
+| R² improvement | +20.6 pp (72.4% → 93.0%) |
 
 **Business applications:**
 - **Dealership pricing:** Automated competitive price estimation at scale — reduces manual appraisal time and introduces consistency across valuation teams
@@ -566,7 +776,7 @@ The `docker-compose.yml` mounts two local directories into the container:
 
 | Host path | Container path | Purpose |
 |-----------|---------------|---------|
-| `./data`    | `/app/data`    | Raw dataset (`Car_sale_ads.csv`) |
+| `./data`    | `/app/data`    | Scraped dataset (`Car_sale_ads_balanced.csv`) |
 | `./reports` | `/app/reports` | Model evaluation output |
 
 The pre-trained model is downloaded from Hugging Face Hub at startup — no local model file is required. An internet connection is needed on first launch.
@@ -577,7 +787,7 @@ The pre-trained model is downloaded from Hugging Face Hub at startup — no loca
 
 ## 🔮 Future Work
 
-- **Up-to-date data:** Scrape current listings to retrain on post-2021 market data and eliminate the need for the inflation adjustment entirely. This is the single highest-impact improvement available.
+- **Continuous retraining:** Use the new incremental data pipeline to periodically retrain on fresh Otomoto listings, keeping the model aligned with current market conditions without manual data collection.
 - **NLP features:** Use Polish-language BERT to extract pricing signals from listing descriptions (e.g., detecting AMG packages, accident history mentions, special equipment not captured in structured fields).
 - **Ensemble strategies:** Experiment with stacking XGBoost alongside LightGBM or CatBoost for potentially lower MAPE on outlier segments, particularly vintage and luxury vehicles where gradient boosting's residual correction could be amplified through a meta-learner.
 - **REST API:** Wrap the model in a FastAPI endpoint for integration into dealer platforms and automated listing tools — enabling programmatic access beyond the Streamlit UI.
@@ -589,6 +799,6 @@ The pre-trained model is downloaded from Hugging Face Hub at startup — no loca
 
 **⭐ If you found this project helpful, please star the repository!**
 
-[![GitHub stars](https://img.shields.io/github/stars/Przemsonn/Cars-Price-Prediction-in-Poland?style=social)](https://github.com/Przemsonn05/Cars-Price-Prediction-in-Poland)
+[![GitHub stars](https://img.shields.io/github/stars/Przemsonn/Cars-Price-Prediction-in-Poland?style=social)](https://github.com/Przemsonn05/PriceMyRide-PL-Car-Valuation-Engine)
 
 </div>

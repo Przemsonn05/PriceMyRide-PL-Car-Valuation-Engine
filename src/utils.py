@@ -31,11 +31,11 @@ def get_current_eur_pln_rate(timeout: int = 5) -> float:
         response.raise_for_status()
         data = response.json()
         rate = data['rates'][0]['mid']
-        print(f"✓ Exchange rate loaded from NBP: {rate:.4f}")
+        print(f"[OK] Exchange rate loaded from NBP: {rate:.4f}")
         return rate
-        
+
     except Exception as e:
-        print(f"⚠️  API failed ({e}). Using default rate: 4.30")
+        print(f"[WARN] API failed ({e}). Using default rate: 4.30")
         return 4.30
 
 
@@ -96,9 +96,9 @@ def upload_models_to_hf(
                 repo_id=repo_id,
                 repo_type="model"
             )
-            print(f"✓ Successfully uploaded: {filename}")
+            print(f"[OK] Successfully uploaded: {filename}")
     
-    print(f"\n✅ All models uploaded to: https://huggingface.co/{repo_id}")
+    print(f"\n[OK] All models uploaded to: https://huggingface.co/{repo_id}")
 
 
 def load_local_model(file_path: Union[str, Path]) -> Any:
@@ -122,6 +122,6 @@ def load_local_model(file_path: Union[str, Path]) -> Any:
     
     print(f"Loading model from: {file_path}")
     model = joblib.load(file_path)
-    print("✓ Model loaded successfully")
+    print("[OK] Model loaded successfully")
     
     return model
