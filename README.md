@@ -1,4 +1,4 @@
-# 🚗 Car Price Prediction in Poland
+# 🚗 PriceMyRide PL: Car Valuation Engine
 
 ![Python](https://img.shields.io/badge/Python-3.12%2B-blue?style=for-the-badge&logo=python)
 ![XGBoost](https://img.shields.io/badge/XGBoost-Model-red?style=for-the-badge&logo=xgboost)
