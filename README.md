@@ -392,10 +392,10 @@ Before diving into model results, it is worth clarifying what each metric actual
 
 | Metric | Interpretation for Car Pricing |
 |--------|-------------------------------|
-| **R²** | Proportion of price variance explained by the model. R² = 0.93 means the model accounts for 93% of the variation in prices across all vehicles — the remaining 7% is due to factors not captured in the data (e.g., vehicle history, negotiation, cosmetic condition). |
-| **MAE** (Mean Absolute Error) | Average absolute prediction error in PLN. MAE = 12,000 PLN means predictions are off by 12,000 PLN on average — regardless of whether the car costs 20,000 or 200,000 PLN. Intuitive but treats all errors equally regardless of price level. |
+| **R²** | Proportion of price variance explained by the model. R² = 0.927 means the model accounts for ~93% of the variation in prices across all vehicles — the remaining 7% is due to factors not captured in the data (e.g., vehicle history, negotiation, cosmetic condition). |
+| **MAE** (Mean Absolute Error) | Average absolute prediction error in PLN. MAE ≈ 12,500 PLN means predictions are off by roughly 12 500 PLN on average — regardless of whether the car costs 20,000 or 200,000 PLN. Intuitive but treats all errors equally regardless of price level. |
 | **RMSE** (Root Mean Squared Error) | Similar to MAE but penalizes large errors more heavily due to squaring. RMSE > MAE always; a large gap between the two indicates the model struggles with certain outlier-prone segments (vintage, supercar). |
-| **MAPE** (Mean Absolute Percentage Error) | Scale-independent error as a percentage of actual price. MAPE = 18.6% means predictions deviate by ~19% on average relative to the actual price — a 100,000 PLN car would be predicted within ±19,000 PLN. Most business-interpretable metric for comparing across price segments. |
+| **MAPE / MdAPE** | MAPE = mean absolute percentage error (influenced by outliers); MdAPE = median absolute percentage error (robust to them). We report both — MAPE ≈ 19.4% for the production model, with MdAPE materially lower on the mass-market segment (see `reports/model_evaluation_report.txt`). |
 
 ---
 
@@ -429,14 +429,14 @@ Switching to Random Forest delivered substantial gains across all metrics: test 
 
 | Metric | Train | Test |
 |--------|-------|------|
-| R² | 94.3% | 93.0% |
-| RMSE | 32,205 PLN | 35,170 PLN |
-| MAE | 9,727 PLN | 11,900 PLN |
-| MAPE | 14.8% | 18.6% |
+| R² | 93.7% | 92.7% |
+| RMSE | 33,833 PLN | 35,899 PLN |
+| MAE | 10,718 PLN | 12,462 PLN |
+| MAPE | 16.3% | 19.4% |
 
-The base XGBoost model achieves the best overall test R² across all models and was selected for production deployment. The test MAE of 11,900 PLN represents a ~38% reduction compared to the Ridge baseline and a ~9% improvement over Random Forest. The MAPE of 18.6% means the model is commercially usable for most vehicle segments — on a 60,000 PLN car, predictions are within approximately ±11,000 PLN on average, which aligns with the natural price spread visible on marketplaces like Otomoto for similar specifications.
+The base XGBoost model achieves the best overall test R² across all models and was selected for production deployment. The test MAE of 12,462 PLN represents a ~36% reduction compared to the Ridge baseline and a ~6% improvement over Random Forest. The MAPE of 19.4% means the model is commercially usable for most vehicle segments — on a 60,000 PLN car, predictions are within approximately ±12,000 PLN on average, which aligns with the natural price spread visible on marketplaces like Otomoto for similar specifications.
 
-Train R² (94.3%) is higher than test R² (93.0%), with a moderate gap that indicates the model generalizes well without significant overfitting. The RMSE gap between train and test (~3,000 PLN) is within normal variance. The train-to-test MAPE difference (14.8% → 18.6%) is modest for a gradient boosting model on heterogeneous price data.
+Train R² (93.7%) is slightly above test R² (92.7%), a moderate gap that indicates the model generalizes well without significant overfitting. The RMSE gap between train and test (~2,000 PLN) is within normal variance. The train-to-test MAPE difference (16.3% → 19.4%) is modest for a gradient boosting model on heterogeneous price data.
 
 ##### XGBoost Feature Importance
 
@@ -460,14 +460,14 @@ The feature importance chart above shows the relative contribution of each featu
 
 | Metric | Train | Test |
 |--------|-------|------|
-| R² | 96.3% | 92.3% |
-| MAE | 9,497 PLN | 11,956 PLN |
-| RMSE | 25,863 PLN | 36,852 PLN |
-| MAPE | 15.6% | 19.3% |
+| R² | 92.5% | 92.0% |
+| MAE | 11,108 PLN | 12,485 PLN |
+| RMSE | 37,006 PLN | 37,499 PLN |
+| MAPE | 17.0% | 19.5% |
 
-This model was developed as an attempt to push beyond the base XGBoost results by combining hyperparameter optimization with sample weighting and additional feature engineering. Brand-related features — `Brand_tier`, `Rarity_index`, and `Brand_popularity` — were introduced specifically to help the model differentiate pricing dynamics for niche, rare, and luxury manufacturers that appear infrequently in the training data. Sample weights were applied using the five-tier brand system (Ultra_Luxury 4×, Luxury 3×, Niche 3.5×, Premium 1.5×, Mass_Market 1×) to boost under-represented segments. Hyperparameter tuning was performed using Optuna with 80 Bayesian search trials, applying strong regularization via Gamma, Alpha, and Lambda penalties.
+This model was developed as an attempt to push beyond the base XGBoost results by combining hyperparameter optimization with sample weighting and additional feature engineering. Brand-related features — `Brand_tier`, `Rarity_index`, and `Brand_popularity` — were introduced specifically to help the model differentiate pricing dynamics for niche, rare, and luxury manufacturers that appear infrequently in the training data. Sample weights were applied using the five-tier brand system (Ultra_Luxury 4×, Luxury 3×, Niche 3.5×, Premium 1.5×, Mass_Market 1×) to boost under-represented segments. Hyperparameter tuning was performed using Optuna with 50 Bayesian trials over K-fold CV, applying strong regularization via Gamma, Alpha, and Lambda penalties.
 
-Despite improved training metrics (R² 96.3%), test performance deteriorated compared to the base model (R² 92.3% vs 93.0%). The train-test R² gap of ~4 pp suggests mild overfitting — the additional model capacity captured training-set-specific patterns rather than generalizable price signals. The strong regularization penalties and explicit column selection in the preprocessor (StandardScaler + TargetEncoder) reduced the model's ability to leverage the full feature set that the base model's dynamic column selectors captured. The additional brand features may also have introduced noise: brand popularity is a proxy for segment, which was already captured through `is_premium` and `is_supercar` flags.
+Despite additional capacity, test performance is slightly below the base model (R² 92.0% vs 92.7%). This is a valuable negative result: once the base XGBoost already generalises well, the combination of strong regularisation, explicit column selection (StandardScaler + TargetEncoder), and brand-level features introduces more noise than signal. Brand popularity is partially a proxy for segment, which was already captured through `is_premium` and `is_supercar` flags.
 
 ##### SHAP Feature Importance
 
@@ -521,17 +521,19 @@ The curves confirm a healthy bias–variance balance:
 | Model | R² (Test) | MAE (Test) | MAPE (Test) | Decision |
 |-------|-----------|------------|-------------|----------|
 | Ridge Regression | 72.4% | 19,355 PLN | 28.5% | ❌ Baseline only |
-| Random Forest | 92.2% | 13,097 PLN | 22.8% | ✅ Strong but surpassed |
-| **XGBoost Base** | **93.0%** | **11,900 PLN** | **18.6%** | ⭐ **Selected** |
-| XGBoost Tuned | 92.3% | 11,956 PLN | 19.3% | ⚠️ Slightly worse |
+| Random Forest | 92.2% | 13,250 PLN | 23.0% | ✅ Strong but surpassed |
+| **XGBoost Base** | **92.7%** | **12,462 PLN** | **19.4%** | ⭐ **Selected** |
+| XGBoost Weighted | 92.0% | 12,485 PLN | 19.5% | ⚠️ Slightly worse |
+
+All numbers reproduced from `reports/model_evaluation_report.txt`.
 
 **Conclusions:**
 
-The progression from Ridge Regression to XGBoost Base tells a clear story about this problem's nature. The 20+ percentage point jump in R² from linear to tree-based models confirms that non-linearity is not an optional enhancement — it is a fundamental requirement for modeling vehicle depreciation. The move from Random Forest to XGBoost delivered a further improvement in MAE (13,097 → 11,900 PLN) and a significant drop in MAPE (22.8% → 18.6%), with the gradient boosting framework's ability to iteratively correct residuals proving particularly valuable for the wide price range present in this dataset.
+The progression from Ridge Regression to XGBoost Base tells a clear story about this problem's nature. The 20+ percentage point jump in R² from linear to tree-based models confirms that non-linearity is not an optional enhancement — it is a fundamental requirement for modeling vehicle depreciation. The move from Random Forest to XGBoost delivered a further MAE improvement (13,250 → 12,462 PLN) and a drop in MAPE (23.0% → 19.4%), with gradient boosting's iterative residual correction proving particularly valuable for the wide price range present in this dataset.
 
-The Tuned XGBoost result is the most instructive: despite 80 optimization trials, sample weighting, and additional brand-level feature engineering, test performance regressed slightly across all metrics (R² 92.3% vs 93.0%). This is a reminder that hyperparameter tuning is not a guaranteed improvement — when a model already generalizes well, the combination of strong regularization and explicit feature selection can reduce its capacity to fit legitimate signal. The base XGBoost configuration found the right balance between bias and variance without needing aggressive penalization.
+The Weighted XGBoost result is the most instructive: despite 50 KFold-CV optimisation trials, sample weighting, and additional brand-level feature engineering, test performance regressed slightly across all metrics (R² 92.0% vs 92.7%). This is a reminder that hyperparameter tuning is not a guaranteed improvement — when a model already generalises well, extra regularisation and explicit feature selection can reduce its capacity to fit legitimate signal. The base XGBoost configuration found the right balance between bias and variance without needing aggressive penalisation.
 
-For practical deployment, a MAPE of 18.6% and MAE of ~11,900 PLN means the model is well-suited for mass-market vehicle valuation (cars in the 20,000–150,000 PLN range) and can serve as a strong pricing signal for dealerships and private sellers alike. The residual 18.6% error reflects a mix of true model uncertainty, the inherent noise in online listing prices (negotiation margins, seller motivation), and the unmodeled quality of individual vehicles.
+For practical deployment, a MAPE of 19.4% (MdAPE even lower on mass-market segment) and MAE of ~12,500 PLN mean the model is well-suited for mass-market vehicle valuation (20,000–150,000 PLN range) and can serve as a strong pricing signal for dealerships and private sellers. The residual 19% error reflects a mix of true model uncertainty, inherent noise in online listing prices (negotiation margins, seller motivation), and the unmodeled quality of individual vehicles.
 
 ---
 
@@ -557,7 +559,7 @@ The landing page provides an overview of the entire project and acts as a naviga
 |---------|---------|
 | **Headline** | Tagline, brief description, and a call-to-action button linking to the valuation form. |
 | **Feature Cards** | Three glass-styled cards summarising the main capabilities: Instant Valuation, Regional Analysis, and Data & Charts. Each card links to the corresponding page. |
-| **Model Performance** | Four metric tiles displaying the production model's key results: R² (93.0%), RMSE (35 170 PLN), MAE (11 900 PLN), and MAPE (18.6%). |
+| **Model Performance** | Four metric tiles displaying the production model's key results: R² (92.7%), RMSE (35 899 PLN), MAE (12 462 PLN), and MAPE (19.4%). |
 | **About the Project** | Five-paragraph description covering the full data science lifecycle: data collection from Otomoto, model architecture comparison (Ridge → Random Forest → XGBoost), feature engineering strategy (41 features from 14 raw inputs), and dataset characteristics (200 000+ listings, 2024–2026 prices). |
 | **Tech Stack Cards** | Three cards highlighting the core technology areas: Machine Learning (XGBoost, Optuna, scikit-learn), Data Pipeline (custom scraper, Pandas, NumPy), and Deployment (Streamlit, Docker, Hugging Face Hub). |
 
@@ -618,7 +620,7 @@ The most content-rich page, organised into **three tabs** with a total of 12 cha
 | **XGBoost Split-Based Importance** | Tree split frequency analysis. Is_new_car (41%) captures the new/used price cliff; Vehicle_age_squared (21%) confirms non-linear depreciation learning; Transmission (10%) reflects the automatic gearbox premium. |
 | **Error Analysis by Vehicle Age** | Residuals plotted by production year. Confirms tight calibration for 2000–2021 mass-market vehicles and identifies the two high-error segments: pre-1980 vintage (RMSE ~59k PLN) and modern supercars. |
 | **Learning Curves** | Training vs validation performance as a function of dataset size. Shows smooth convergence with a plateau beyond ~150 000 samples, indicating the feature set's information ceiling. |
-| **Model Comparison** | Side-by-side metrics for Ridge, Random Forest, XGBoost Base, and XGBoost Weighted. Explains why Base XGBoost was selected (best test MAPE at 18.6%) despite the tuned variant's stronger training metrics. |
+| **Model Comparison** | Side-by-side metrics for Ridge, Random Forest, XGBoost Base, and XGBoost Weighted. Explains why Base XGBoost was selected (best test MAPE at 19.4%) despite the weighted variant's additional capacity. |
 | **Actual vs Predicted Prices** | Scatter plot of predicted vs true prices. Confirms excellent mass-market accuracy along the diagonal and increasing scatter above 300 000 PLN due to limited luxury training data. |
 
 **Tab 3 — Business Insights** (8 insight cards):
@@ -645,7 +647,7 @@ Technical documentation of the model architecture, designed for users who want t
 | **Model Overview** | Brief description of the XGBoost pipeline and its purpose. |
 | **Why XGBoost?** | Comparison table (Ridge vs Random Forest vs XGBoost) with key advantages: sequential boosting, robustness to noise, fast inference, L1/L2 regularisation. |
 | **Feature Set** | Full list of 41 features split into 14 raw inputs and 27 engineered features, with descriptions for each derived feature. |
-| **Final Results** | R² 93.0%, RMSE 35 170 PLN, MAE 11 900 PLN, MAPE 18.6% — with plain-language interpretations. |
+| **Final Results** | R² 92.7%, RMSE 35 899 PLN, MAE 12 462 PLN, MAPE 19.4% — with plain-language interpretations. |
 | **Training Pipeline** | Seven-step process: data collection → preprocessing → feature engineering → model selection → hyperparameter tuning → validation → deployment. |
 | **Limitations** | Explicit accuracy boundaries: best for mass-market (100–300 HP, 50–200k km, 2010–2024); reduced for luxury, vintage, and rare models. |
 | **Tech Stack** | XGBoost 2.0, scikit-learn, Optuna, Pandas, Streamlit, Docker, Hugging Face Hub, Plotly, Folium. |
@@ -682,9 +684,9 @@ The Otomoto link is automatically generated with filters matching the predicted 
 
 | Improvement vs Baseline | Value |
 |-------------------------|-------|
-| MAE reduction | **38.5%** (19,355 → 11,900 PLN) |
-| MAPE reduction | **34.7%** (28.5% → 18.6%) |
-| R² improvement | +20.6 pp (72.4% → 93.0%) |
+| MAE reduction | **35.6%** (19,355 → 12,462 PLN) |
+| MAPE reduction | **31.8%** (28.5% → 19.4%) |
+| R² improvement | +20.3 pp (72.4% → 92.7%) |
 
 **Business applications:**
 - **Dealership pricing:** Automated competitive price estimation at scale — reduces manual appraisal time and introduces consistency across valuation teams
@@ -723,17 +725,35 @@ The Otomoto link is automatically generated with filters matching the predicted 
    pip install -r requirements.txt
    ```
 
-3. **Run the full pipeline (optional — model is pre-trained on Hugging Face):**
+3. **Run the smoke tests (works out-of-the-box on the committed 1,000-row sample):**
    ```bash
-   python main.py
+   pytest tests/ -v        # unit tests for config, features, metrics, pipeline
+   python main.py --mode test
    ```
 
-4. **Launch the Streamlit app:**
+4. **Run the full pipeline** (optional — the live app already loads a pre-trained model from Hugging Face):
+   ```bash
+   python main.py --mode full        # end-to-end training + evaluation + plots
+   python main.py --mode production  # just rebuild final_car_price_model.joblib
+   python main.py --mode collect     # re-scrape Otomoto (takes ~2 hours)
+   ```
+
+5. **Launch the Streamlit app:**
    ```bash
    streamlit run app.py
    ```
 
-5. Inspect `notebooks/` for step-by-step experiment documentation and exploratory analysis.
+6. Inspect `notebooks/` for step-by-step experiment documentation and exploratory analysis.
+
+### Where the data comes from
+
+| File | Size | Committed to git? | Purpose |
+|------|------|-------------------|---------|
+| `data/Car_sale_ads_balanced.csv` | ~28 MB | ❌ (gitignored) | Full scraped dataset (~118k rows), used for training |
+| `data/sample/Car_sale_ads_balanced_sample.csv` | ~250 KB | ✅ | Stratified 1,000-row sample, used by CI and smoke tests |
+| `data/processed/cars_cleaned.csv` | ~28 MB | ❌ (gitignored) | Cached cleaned version of the full dataset |
+
+CI (`.github/workflows/test.yml`) runs the pytest suite and `python main.py --mode test` on every push against both Python 3.11 and 3.12 using only the committed sample.
 
 ---
 

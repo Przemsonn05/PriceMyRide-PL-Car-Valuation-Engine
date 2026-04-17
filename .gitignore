@@ -14,7 +14,11 @@ env/
 *.xlsx
 *.json
 *.parquet
-data/
+# Ignore the full raw/processed data tree but whitelist a tiny sample
+# so the repo is runnable and CI-testable out-of-the-box.
+data/*
+!data/sample/
+!data/sample/*.csv
 datasets/
 
 *.pkl

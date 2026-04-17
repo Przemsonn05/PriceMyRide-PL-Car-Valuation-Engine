@@ -25,43 +25,132 @@ from sklearn.metrics import (
     mean_absolute_error,
     mean_absolute_percentage_error
 )
-from sklearn.model_selection import learning_curve
+from sklearn.model_selection import KFold, cross_val_score, learning_curve
 from sklearn.pipeline import Pipeline
 
-from .config import print_if_verbose
+from .config import RANDOM_STATE, print_if_verbose
 
 def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    """Calculate standard regression metrics.
+
+    Returns a dictionary with:
+
+    * ``R2``   — coefficient of determination
+    * ``RMSE`` — root mean squared error (PLN)
+    * ``MAE``  — mean absolute error (PLN)
+    * ``MAPE`` — mean absolute percentage error (0-1 scale)
+    * ``MdAPE`` — *median* absolute percentage error (0-1 scale).
+      Robust to outliers, less biased than MAPE for heavy-tailed
+      price distributions like this one.
+
+    A small epsilon is added to the denominator when computing percentage
+    errors to protect against zero-priced rows.
     """
-    Calculate standard regression metrics.
-    
+    y_true_arr = np.asarray(y_true, dtype=float)
+    y_pred_arr = np.asarray(y_pred, dtype=float)
+
+    eps = 1e-9
+    abs_pct_err = np.abs(y_true_arr - y_pred_arr) / np.maximum(np.abs(y_true_arr), eps)
+
+    return {
+        'R2':    r2_score(y_true_arr, y_pred_arr),
+        'RMSE':  np.sqrt(mean_squared_error(y_true_arr, y_pred_arr)),
+        'MAE':   mean_absolute_error(y_true_arr, y_pred_arr),
+        'MAPE':  mean_absolute_percentage_error(y_true_arr, y_pred_arr),
+        'MdAPE': float(np.median(abs_pct_err)),
+    }
+
+
+def cross_validate_model(
+    model: Pipeline,
+    X: pd.DataFrame,
+    y: np.ndarray,
+    n_folds: int = 5,
+    log_transformed: bool = True,
+) -> Dict[str, float]:
+    """Run k-fold CV and return mean / std / 95% CI for RMSE, MAE, R2, MAPE.
+
     Parameters
     ----------
-    y_true : np.ndarray
-        True target values
-    y_pred : np.ndarray
-        Predicted values
-        
+    model : Pipeline
+        Unfitted pipeline (will be cloned internally by cross_val_score).
+    X : pd.DataFrame
+        Features (raw — pipeline handles feature engineering).
+    y : np.ndarray
+        Target **on the scale the pipeline expects to predict** (log or raw).
+    n_folds : int, default 5
+    log_transformed : bool, default True
+        If True, predictions are inverse-log-transformed before scoring,
+        so reported RMSE/MAE/MAPE are in PLN.
+
     Returns
     -------
-    dict
-        Dictionary with metrics:
-        - R2: Coefficient of determination
-        - RMSE: Root Mean Squared Error
-        - MAE: Mean Absolute Error
-        - MAPE: Mean Absolute Percentage Error (0-1 scale)
-        
-    Examples
-    --------
-    >>> metrics = calculate_metrics(y_test, y_pred)
-    >>> print(f"R²: {metrics['R2']:.3f}")
-    >>> print(f"MAPE: {metrics['MAPE']*100:.1f}%")
+    dict with keys ``R2_mean``, ``R2_std``, ``R2_ci95``, ``RMSE_*``, etc.
     """
-    return {
-        'R2': r2_score(y_true, y_pred),
-        'RMSE': np.sqrt(mean_squared_error(y_true, y_pred)),
-        'MAE': mean_absolute_error(y_true, y_pred),
-        'MAPE': mean_absolute_percentage_error(y_true, y_pred)
-    }
+    from sklearn.base import clone
+
+    print_if_verbose(f"\nRunning {n_folds}-fold cross-validation...")
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=RANDOM_STATE)
+
+    fold_metrics: Dict[str, list] = {"R2": [], "RMSE": [], "MAE": [], "MAPE": [], "MdAPE": []}
+
+    y_arr = np.asarray(y)
+    for fold_i, (tr_idx, val_idx) in enumerate(kf.split(X), start=1):
+        X_tr, X_val = X.iloc[tr_idx], X.iloc[val_idx]
+        y_tr, y_val = y_arr[tr_idx], y_arr[val_idx]
+
+        m = clone(model)
+        m.fit(X_tr, y_tr)
+        preds = m.predict(X_val)
+
+        if log_transformed:
+            preds_pln = np.expm1(preds)
+            y_val_pln = np.expm1(y_val)
+        else:
+            preds_pln, y_val_pln = preds, y_val
+
+        metrics = calculate_metrics(y_val_pln, preds_pln)
+        for k, v in metrics.items():
+            fold_metrics[k].append(v)
+        print_if_verbose(
+            f"  fold {fold_i}/{n_folds}: R2={metrics['R2']:.4f}  "
+            f"MAE={metrics['MAE']:,.0f}  MAPE={metrics['MAPE']*100:.2f}%"
+        )
+
+    summary: Dict[str, float] = {}
+    for metric, values in fold_metrics.items():
+        arr = np.asarray(values, dtype=float)
+        summary[f"{metric}_mean"] = float(arr.mean())
+        summary[f"{metric}_std"] = float(arr.std(ddof=1) if len(arr) > 1 else 0.0)
+        # Approximate 95% CI (Gaussian) for the fold-mean statistic.
+        summary[f"{metric}_ci95"] = 1.96 * summary[f"{metric}_std"] / np.sqrt(max(len(arr), 1))
+
+    print_if_verbose(
+        f"[OK] CV summary — R² = {summary['R2_mean']:.4f} ± {summary['R2_ci95']:.4f}, "
+        f"MAPE = {summary['MAPE_mean']*100:.2f}% ± {summary['MAPE_ci95']*100:.2f}pp"
+    )
+    return summary
+
+
+def format_cv_summary(summary: Dict[str, float]) -> str:
+    """Pretty-print a ``cross_validate_model`` summary for the report."""
+    lines = ["Cross-validated (5-fold) test metrics — mean ± 95% CI:"]
+    lines.append(
+        f"  R^2   : {summary['R2_mean']:.4f} ± {summary['R2_ci95']:.4f}"
+    )
+    lines.append(
+        f"  RMSE  : {summary['RMSE_mean']:,.0f} ± {summary['RMSE_ci95']:,.0f} PLN"
+    )
+    lines.append(
+        f"  MAE   : {summary['MAE_mean']:,.0f} ± {summary['MAE_ci95']:,.0f} PLN"
+    )
+    lines.append(
+        f"  MAPE  : {summary['MAPE_mean']*100:.2f}% ± {summary['MAPE_ci95']*100:.2f} pp"
+    )
+    lines.append(
+        f"  MdAPE : {summary['MdAPE_mean']*100:.2f}% ± {summary['MdAPE_ci95']*100:.2f} pp"
+    )
+    return "\n".join(lines)
 
 
 def create_metrics_table(

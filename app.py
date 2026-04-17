@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Make src/ importable when Streamlit runs this file.
+_PROJECT_ROOT = Path(__file__).parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import streamlit as st
 import joblib
 import pandas as pd
@@ -10,7 +18,21 @@ from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
-CURRENT_YEAR = datetime.now().year
+from src.config import (
+    BRAND_FREQUENCY_FALLBACK,
+    IS_PREMIUM_BRANDS,
+    get_age_category,
+    get_brand_popularity,
+    get_brand_tier,
+    get_performance_category,
+    get_usage_category,
+)
+
+
+def _current_year() -> int:
+    """Always read the current year at call time (avoids a stale module-level
+    value that would go out of date if the container runs across New Year)."""
+    return datetime.now().year
 
 st.set_page_config(
     page_title="CarVal PL - Car Price Prediction",
@@ -294,92 +316,22 @@ div[data-testid="column"] .stButton > button:hover {
 
 
 # ---------------------------------------------------------------------------
-# Brand knowledge-base
+# Helpers — brand classification, category binning, and link generation.
+#
+# Tier constants, frequency fallback, and binning helpers all come from
+# src.config (imported above) so there is a single source of truth shared
+# with training code in src/features.py and src/models.py.
 # ---------------------------------------------------------------------------
-
-BRAND_FREQUENCY_MAP: dict[str, int] = {
-    "volkswagen": 22000, "toyota": 15000, "audi": 14000, "bmw": 13500,
-    "mercedes-benz": 13000, "opel": 11000, "ford": 10500, "kia": 10000,
-    "hyundai": 9500, "renault": 9000, "peugeot": 8000, "skoda": 8000,
-    "seat": 7500, "honda": 6500, "volvo": 6000, "mazda": 5500,
-    "nissan": 5000, "mitsubishi": 4500, "fiat": 4000, "citroen": 3800,
-    "suzuki": 3500, "subaru": 3000, "land rover": 2500, "jeep": 2200,
-    "mini": 2000, "alfa romeo": 1800, "lexus": 1500, "infiniti": 800,
-    "dacia": 3000, "tesla": 1200, "porsche": 1000, "jaguar": 700,
-    "chevrolet": 600, "dodge": 300, "cadillac": 200, "bentley": 80,
-    "ferrari": 60, "lamborghini": 50, "rolls-royce": 40, "maserati": 90,
-    "mclaren": 30, "aston martin": 35, "lotus": 45, "maybach": 25,
-    "lada": 400, "trabant": 150, "polonez": 120, "syrena": 80,
-    "warszawa": 60, "wartburg": 70, "gaz": 55, "moskwicz": 65,
-}
-
-ULTRA_LUXURY_BRANDS = {
-    'ferrari', 'lamborghini', 'rolls-royce', 'bentley', 'mclaren',
-    'bugatti', 'koenigsegg', 'pagani', 'aston martin', 'maybach'
-}
-LUXURY_BRANDS = {
-    'mercedes-benz', 'bmw', 'audi', 'porsche', 'lexus', 'jaguar',
-    'maserati', 'tesla', 'land rover', 'infiniti', 'lincoln', 'genesis',
-    'cadillac', 'volvo'
-}
-PREMIUM_BRANDS = {
-    'alfa romeo', 'mini', 'saab', 'ds automobiles', 'cupra', 'alpine',
-    'lotus', 'subaru', 'acura', 'baic', 'ssangyong'
-}
-MASS_MARKET_BRANDS = {
-    'volkswagen', 'toyota', 'ford', 'hyundai', 'kia', 'honda',
-    'opel', 'chevrolet', 'peugeot', 'renault', 'seat', 'skoda',
-    'fiat', 'nissan', 'mazda', 'mitsubishi', 'suzuki', 'dacia',
-    'citroen', 'citroën', 'dodge', 'ram', 'jeep', 'chrysler',
-    'lancia', 'daewoo', 'lada'
-}
-ALL_PREMIUM_SET = ULTRA_LUXURY_BRANDS | LUXURY_BRANDS | PREMIUM_BRANDS
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def get_brand_tier(brand: str) -> str:
-    b = brand.strip().lower()
-    if b in ULTRA_LUXURY_BRANDS: return "Ultra_Luxury"
-    if b in LUXURY_BRANDS:       return "Luxury"
-    if b in PREMIUM_BRANDS:      return "Premium"
-    if b in MASS_MARKET_BRANDS:  return "Mass_Market"
-    return "Niche"
-
-
-def get_age_category(age: float) -> str:
-    if age < 3:  return "New"
-    if age < 9:  return "Recent"
-    if age < 17: return "Used"
-    return "Old"
-
-
-def get_performance_category(hp_per_liter: float) -> str:
-    if pd.isna(hp_per_liter): return "Unknown"
-    if hp_per_liter < 60:     return "Economy"
-    if hp_per_liter < 100:    return "Standard"
-    if hp_per_liter < 150:    return "Performance"
-    return "High_Performance"
-
-
-def get_usage_category(mileage_per_year: float) -> str:
-    if pd.isna(mileage_per_year): return "Unknown"
-    if mileage_per_year < 10000:  return "Low"
-    if mileage_per_year < 20000:  return "Average"
-    if mileage_per_year < 30000:  return "High"
-    return "Very_High"
-
 
 def generate_otomoto_link(brand, model, year, price_min, price_max):
+    """Build an Otomoto search URL for listings close to the predicted car."""
     base_url = "https://www.otomoto.pl/osobowe"
-    brand_clean = brand.lower().replace(' ', '-').replace('o\u0308', 'o').replace('e\u0301', 'e')
+    brand_clean = brand.lower().replace(' ', '-').replace('\u0308', '').replace('\u0301', '')
     model_clean = model.lower().replace(' ', '-') if model else ""
     params = {
         'search[filter_enum_make]': brand,
         'search[filter_float_year:from]': max(year - 1, 1915),
-        'search[filter_float_year:to]': min(year + 1, CURRENT_YEAR),
+        'search[filter_float_year:to]': min(year + 1, _current_year()),
         'search[filter_float_price:from]': int(price_min * 0.89),
         'search[filter_float_price:to]': int(price_max * 1.10),
     }
@@ -389,19 +341,52 @@ def generate_otomoto_link(brand, model, year, price_min, price_max):
 
 
 # ---------------------------------------------------------------------------
-# Feature engineering
+# Feature-engineering bridge.
+#
+# The production pipeline bundles a FeatureEngineeringTransformer, so all we
+# need to do here is assemble a DataFrame with the raw columns the
+# transformer expects.  The legacy pre-engineered 41-column layout is
+# reproduced only when the loaded model does NOT contain that transformer
+# (back-compat for the originally deployed HF artifact).
 # ---------------------------------------------------------------------------
 
-def prepare_input_data(user_inputs: dict) -> pd.DataFrame:
+_RAW_INPUT_COLUMNS = [
+    "Condition", "Vehicle_brand", "Vehicle_model",
+    "Production_year", "Mileage_km", "Power_HP", "Displacement_cm3",
+    "Fuel_type", "Drive", "Transmission", "Type", "Doors_number",
+    "Colour", "Origin_country", "First_owner", "Offer_location", "Features",
+]
+
+
+def prepare_raw_input(user_inputs: dict) -> pd.DataFrame:
+    """Assemble a single-row DataFrame with raw columns for the production
+    pipeline (FeatureEngineeringTransformer will do the rest)."""
+    row = {col: user_inputs.get(col) for col in _RAW_INPUT_COLUMNS}
+    df = pd.DataFrame([row])
+    df["Production_year"] = df["Production_year"].astype(int)
+    df["Doors_number"] = df["Doors_number"].astype("Int64")
+    return df
+
+
+def prepare_legacy_input(user_inputs: dict, brand_freq_map: dict | None = None) -> pd.DataFrame:
+    """Build the legacy 41-column pre-engineered DataFrame.
+
+    Used when the loaded model is the **original** deployed XGBoost that
+    expects all features pre-built (no FeatureEngineeringTransformer inside).
+
+    If *brand_freq_map* is provided by the artifact, use it to ensure the
+    same brand frequencies the model was trained on; otherwise fall back to
+    the hand-curated map in ``src.config.BRAND_FREQUENCY_FALLBACK``.
+    """
+    brand_freq_map = brand_freq_map or BRAND_FREQUENCY_FALLBACK
+
     df = pd.DataFrame([user_inputs])
 
     brand_lower = df["Vehicle_brand"].iloc[0].strip().lower()
-    model_lower = df["Vehicle_model"].iloc[0].strip().lower()
-
-    df["Vehicle_age"] = CURRENT_YEAR - df["Production_year"].astype(int)
+    df["Vehicle_age"] = _current_year() - df["Production_year"].astype(int)
     age = int(df["Vehicle_age"].iloc[0])
 
-    feat_str = df["Features"].iloc[0]
+    feat_str = df["Features"].iloc[0] if "Features" in df.columns else ""
     feat_list = [f.strip() for f in str(feat_str).split(",") if f.strip()] if feat_str else []
     df["Num_features"] = len(feat_list)
     df["Features"] = str(feat_list)
@@ -411,59 +396,52 @@ def prepare_input_data(user_inputs: dict) -> pd.DataFrame:
     df["Is_old_car"] = int(age > 16)
 
     mileage = float(df["Mileage_km"].iloc[0])
-    power   = float(df["Power_HP"].iloc[0])
-    disp    = float(df["Displacement_cm3"].iloc[0])
+    power = float(df["Power_HP"].iloc[0])
+    disp = float(df["Displacement_cm3"].iloc[0])
 
     mileage_per_year = mileage / max(age, 1)
     df["Mileage_per_year"] = mileage_per_year
-    df["Usage_intensity"]  = get_usage_category(mileage_per_year)
+    df["Usage_intensity"] = get_usage_category(mileage_per_year)
 
     disp_safe = max(disp, 100.0)
     hp_per_liter = power / (disp_safe / 1000.0)
-    df["HP_per_liter"]         = hp_per_liter
+    df["HP_per_liter"] = hp_per_liter
     df["Performance_category"] = get_performance_category(hp_per_liter)
 
-    is_premium  = int(brand_lower in ALL_PREMIUM_SET)
-    is_supercar = int(power > 500 and is_premium)
-    is_collector = int(age > 25)
+    is_premium = int(brand_lower in IS_PREMIUM_BRANDS)
+    df["Is_premium"] = is_premium
+    df["Is_supercar"] = int(power > 500 and is_premium)
+    df["Is_collector"] = int(age > 25)
 
-    df["Is_premium"]   = is_premium
-    df["Is_supercar"]  = is_supercar
-    df["Is_collector"] = is_collector
+    df["Listing_year"] = _current_year()
 
-    df["Listing_year"] = CURRENT_YEAR
-
-    df["Mileage_km_log"]       = np.log1p(max(mileage, 0))
-    df["Power_HP_log"]         = np.log1p(max(power, 0))
+    df["Mileage_km_log"] = np.log1p(max(mileage, 0))
+    df["Power_HP_log"] = np.log1p(max(power, 0))
     df["Displacement_cm3_log"] = np.log1p(max(disp, 0))
 
-    df["Vehicle_age_squared"]  = age ** 2
-    df["Power_HP_squared"]     = power ** 2
-    df["Mileage_km_squared"]   = mileage ** 2
+    df["Vehicle_age_squared"] = age ** 2
+    df["Power_HP_squared"] = power ** 2
+    df["Mileage_km_squared"] = mileage ** 2
 
-    df["Age_Mileage_interaction"]  = age * mileage
-    df["Power_Age_interaction"]    = power * age
-    df["Mileage_per_year_Age"]     = mileage_per_year * age
+    df["Age_Mileage_interaction"] = age * mileage
+    df["Power_Age_interaction"] = power * age
+    df["Mileage_per_year_Age"] = mileage_per_year * age
 
-    brand_freq = BRAND_FREQUENCY_MAP.get(brand_lower, 500)
+    brand_freq = int(brand_freq_map.get(brand_lower, 500))
+    # Brand-model frequency is unknown at serving time when not persisted —
+    # use a conservative fraction of brand frequency as an approximation.
     brandmodel_freq = max(brand_freq // 5, 10)
 
-    max_freq = 22000.0
+    max_freq = max(brand_freq_map.values()) if brand_freq_map else 22000
     raw_rarity = np.log1p(max_freq / max(brand_freq, 1))
-    max_rarity = np.log1p(max_freq / 1.0)
+    max_rarity = np.log1p(max_freq)
     rarity_index = min(raw_rarity / max_rarity, 1.0)
 
-    df["Brand_tier"]           = get_brand_tier(df["Vehicle_brand"].iloc[0])
-    df["Brand_frequency"]      = brand_freq
-    df["Rarity_index"]         = round(rarity_index, 4)
+    df["Brand_tier"] = get_brand_tier(df["Vehicle_brand"].iloc[0])
+    df["Brand_frequency"] = brand_freq
+    df["Rarity_index"] = round(float(rarity_index), 4)
     df["BrandModel_frequency"] = brandmodel_freq
-
-    if brand_freq <= 5:     pop = "Ultra_Rare"
-    elif brand_freq <= 20:  pop = "Rare"
-    elif brand_freq <= 100: pop = "Uncommon"
-    elif brand_freq <= 500: pop = "Common"
-    else:                   pop = "Popular"
-    df["Brand_popularity"] = pop
+    df["Brand_popularity"] = get_brand_popularity(brand_freq)
 
     df = df.drop(columns=["Production_year", "Drive"], errors="ignore")
 
@@ -484,24 +462,40 @@ def prepare_input_data(user_inputs: dict) -> pd.DataFrame:
         "Brand_tier", "Brand_frequency", "Rarity_index",
         "BrandModel_frequency", "Brand_popularity",
     ]
-
     for col in expected_columns:
         if col not in df.columns:
             df[col] = 0
-
     return df[expected_columns]
+
+
+def pipeline_has_feature_engineer(pipeline) -> bool:
+    """Return True if *pipeline* already bundles a FeatureEngineeringTransformer."""
+    try:
+        steps = getattr(pipeline, "named_steps", {})
+        return "features" in steps and type(steps["features"]).__name__ == "FeatureEngineeringTransformer"
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading price-prediction model...")
 def load_model():
+    """Download the production model from Hugging Face.
+
+    Accepts three artifact layouts for backward compatibility:
+
+    * a plain ``sklearn`` pipeline,
+    * a dict ``{"model_pipeline": pipeline, ...}`` (legacy),
+    * a dict ``{"pipeline": pipeline, "cv_summary": …, "test_metrics": …}``
+      (what ``main.py`` --mode production saves).
+    """
     try:
         model_path = hf_hub_download(
             repo_id="Przemsonn/poland-car-price-model",
-            filename="final_car_price_model.joblib"
+            filename="final_car_price_model.joblib",
         )
         return joblib.load(model_path)
     except Exception as e:
@@ -509,36 +503,104 @@ def load_model():
         return None
 
 
-@st.cache_data
-def load_sample_data():
-    np.random.seed(42)
-    cities = [
-        "Warszawa", "Krakow", "Wroclaw", "Poznan", "Gdansk",
-        "Szczecin", "Bydgoszcz", "Lublin", "Katowice", "Bialystok",
-        "Gdynia", "Czestochowa", "Radom", "Sosnowiec", "Torun",
-        "Kielce", "Gliwice", "Zabrze", "Bytom", "Olsztyn",
-        "Lodz", "Rzeszow", "Zielona Gora", "Opole", "Gorzow Wielkopolski",
-        "Bielsko-Biala", "Plock", "Legnica", "Tarnow", "Chorzow"
-    ]
-    city_coords = {
-        "Warszawa": (52.2297, 21.0122), "Krakow": (50.0647, 19.9450),
-        "Wroclaw": (51.1079, 17.0385), "Poznan": (52.4064, 16.9252),
-        "Gdansk": (54.3520, 18.6466), "Szczecin": (53.4285, 14.5528),
-        "Bydgoszcz": (53.1235, 18.0084), "Lublin": (51.2465, 22.5684),
-        "Katowice": (50.2649, 19.0238), "Bialystok": (53.1325, 23.1688),
-        "Gdynia": (54.5189, 18.5305), "Czestochowa": (50.8118, 19.1203),
-        "Radom": (51.4027, 21.1471), "Sosnowiec": (50.2862, 19.1040),
-        "Torun": (53.0138, 18.5984), "Kielce": (50.8661, 20.6286),
-        "Gliwice": (50.2945, 18.6714), "Zabrze": (50.3249, 18.7856),
-        "Bytom": (50.3483, 18.9160), "Olsztyn": (53.7784, 20.4801),
-        "Lodz": (51.7592, 19.4560), "Rzeszow": (50.0413, 22.0010),
-        "Zielona Gora": (51.9356, 15.5062), "Opole": (50.6669, 17.9231),
-        "Gorzow Wielkopolski": (52.7311, 15.2287), "Bielsko-Biala": (49.8225, 19.0468),
-        "Plock": (52.5464, 19.7065), "Legnica": (51.2070, 16.1553),
-        "Tarnow": (50.0121, 20.9858), "Chorzow": (50.2975, 18.9448)
+def extract_pipeline(model_data):
+    """Normalise the various artifact layouts to a single sklearn pipeline."""
+    if model_data is None:
+        return None, {}
+    if isinstance(model_data, dict):
+        pipeline = (
+            model_data.get("pipeline")
+            or model_data.get("model_pipeline")
+        )
+        return pipeline, model_data
+    return model_data, {}
+
+
+# ---------------------------------------------------------------------------
+# Regional-market data.
+#
+# Previously this returned np.random.randint(500, 5000) per city and
+# presented the result as "geographic distribution of 200 000+ listings".
+# That was a fabrication.  The new implementation computes real counts from
+# the training CSV (data/Car_sale_ads_balanced.csv) whenever it is present.
+# When the CSV is missing (e.g. on the Streamlit Cloud container that only
+# ships the app code), we fall back to a demo dataset that is clearly
+# labelled as such in the UI.
+# ---------------------------------------------------------------------------
+
+_CITY_COORDS: dict[str, tuple[float, float]] = {
+    "warszawa": (52.2297, 21.0122), "krakow": (50.0647, 19.9450),
+    "wroclaw": (51.1079, 17.0385), "poznan": (52.4064, 16.9252),
+    "gdansk": (54.3520, 18.6466), "szczecin": (53.4285, 14.5528),
+    "bydgoszcz": (53.1235, 18.0084), "lublin": (51.2465, 22.5684),
+    "katowice": (50.2649, 19.0238), "bialystok": (53.1325, 23.1688),
+    "gdynia": (54.5189, 18.5305), "czestochowa": (50.8118, 19.1203),
+    "radom": (51.4027, 21.1471), "sosnowiec": (50.2862, 19.1040),
+    "torun": (53.0138, 18.5984), "kielce": (50.8661, 20.6286),
+    "gliwice": (50.2945, 18.6714), "zabrze": (50.3249, 18.7856),
+    "bytom": (50.3483, 18.9160), "olsztyn": (53.7784, 20.4801),
+    "lodz": (51.7592, 19.4560), "rzeszow": (50.0413, 22.0010),
+    "zielona gora": (51.9356, 15.5062), "opole": (50.6669, 17.9231),
+    "gorzow wielkopolski": (52.7311, 15.2287), "bielsko-biala": (49.8225, 19.0468),
+    "plock": (52.5464, 19.7065), "legnica": (51.2070, 16.1553),
+    "tarnow": (50.0121, 20.9858), "chorzow": (50.2975, 18.9448),
+}
+
+
+def _extract_city(offer_location: str) -> str | None:
+    """Grab the city portion from a Polish offer_location string.
+
+    Otomoto formats are e.g. ``"Kraków, Małopolskie (Krakowski)"`` or
+    ``"Warszawa, Ochota"`` — take the text before the first comma, lowercase,
+    strip diacritics so we can match our coordinates table.
+    """
+    if not isinstance(offer_location, str) or not offer_location.strip():
+        return None
+    head = offer_location.split(",")[0].strip().lower()
+    replacements = {
+        "\u0142": "l", "\u0105": "a", "\u0107": "c", "\u0119": "e",
+        "\u0144": "n", "\u015b": "s", "\u017a": "z", "\u017c": "z",
+        "\u00f3": "o",
     }
-    city_sales = {city: np.random.randint(500, 5000) for city in cities}
-    return city_sales, city_coords
+    for k, v in replacements.items():
+        head = head.replace(k, v)
+    return head or None
+
+
+@st.cache_data(show_spinner=False)
+def load_regional_data() -> tuple[dict[str, int], dict[str, tuple[float, float]], bool]:
+    """Return ``(city_counts, city_coords, is_real_data)``.
+
+    Attempts, in order:
+
+    1. ``data/Car_sale_ads_balanced.csv`` — real scraped data.
+    2. ``data/processed/cars_cleaned.csv`` — processed data.
+    3. Synthetic demo data — clearly flagged to the UI.
+    """
+    candidate_paths = [
+        _PROJECT_ROOT / "data" / "Car_sale_ads_balanced.csv",
+        _PROJECT_ROOT / "data" / "processed" / "cars_cleaned.csv",
+    ]
+    for p in candidate_paths:
+        if not p.exists():
+            continue
+        try:
+            df = pd.read_csv(p, usecols=["Offer_location"])
+        except Exception:
+            continue
+        cities = df["Offer_location"].dropna().apply(_extract_city).dropna()
+        counts = cities.value_counts().to_dict()
+        matched = {city: int(n) for city, n in counts.items() if city in _CITY_COORDS}
+        if matched:
+            coords = {c.title(): _CITY_COORDS[c] for c in matched}
+            city_counts = {c.title(): matched[c] for c in matched}
+            return city_counts, coords, True
+
+    # Demo fallback (flagged by the UI).
+    rng = np.random.default_rng(42)
+    demo = {city.title(): int(rng.integers(500, 5000)) for city in _CITY_COORDS}
+    coords = {city.title(): coord for city, coord in _CITY_COORDS.items()}
+    return demo, coords, False
 
 
 # ---------------------------------------------------------------------------
@@ -546,15 +608,16 @@ def load_sample_data():
 # ---------------------------------------------------------------------------
 
 model_data = load_model()
-if model_data:
-    pipeline = (
-        model_data["model_pipeline"]
-        if isinstance(model_data, dict)
-        else model_data
-    )
-else:
+pipeline, model_meta = extract_pipeline(model_data)
+if pipeline is None:
     st.error("Model cannot be loaded. Check your internet connection.")
     st.stop()
+
+#: True when the loaded artifact has FeatureEngineeringTransformer bundled
+#: (production build from main.py --mode production).
+_HAS_FEATURE_ENGINEER = pipeline_has_feature_engineer(pipeline)
+#: Brand-frequency map saved alongside the legacy model, if any.
+_ARTIFACT_BRAND_FREQ = model_meta.get("brand_freq_map")
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +649,7 @@ with st.sidebar:
         </div>
         <div style='font-size: 10px; color: #334155; margin-top: 4px;
                     text-transform: uppercase; letter-spacing: 0.14em; font-weight: 500;'>
-            Poland Market &middot; {CURRENT_YEAR}
+            Poland Market &middot; {_current_year()}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -613,7 +676,7 @@ with st.sidebar:
     <div style='text-align: center; padding: 0 8px;'>
         <p style='font-size: 10px; color: #1e293b; line-height: 2; margin: 0; font-weight: 500;'>
             XGBoost &middot; scikit-learn<br>
-            200 000+ listings &middot; R&sup2; 93.0%<br>
+            200 000+ listings &middot; R&sup2; 92.7%<br>
             <span style='color:#1e293b;'>Przemsonn/poland-car-price-model</span>
         </p>
     </div>
@@ -662,7 +725,7 @@ def _show_image(path: str) -> None:
 def home_page() -> None:
     st.markdown(f"""
     <div style='padding: 56px 0 40px; text-align: center;'>
-        <div class='hero-badge'>Polish Automotive Market &middot; {CURRENT_YEAR}</div>
+        <div class='hero-badge'>Polish Automotive Market &middot; {_current_year()}</div>
         <h1 style='font-size: 60px; font-weight: 900; color: #f1f5f9 !important;
                    letter-spacing: -0.04em; line-height: 1.05; margin: 0 0 20px;'>
             What is your car<br>worth today?
@@ -718,10 +781,10 @@ def home_page() -> None:
     )
     m1, m2, m3, m4 = st.columns(4)
     metrics = [
-        ("93.0%", "R&sup2; Score"),
-        ("35 170 PLN", "RMSE"),
-        ("11 900 PLN", "MAE"),
-        ("18.6%", "MAPE"),
+        ("92.7%", "R&sup2; Score"),
+        ("35 899 PLN", "RMSE"),
+        ("12 462 PLN", "MAE"),
+        ("19.4%", "MAPE"),
     ]
     for col, (val, lbl) in zip([m1, m2, m3, m4], metrics):
         with col:
@@ -739,7 +802,7 @@ def home_page() -> None:
         The XGBoost model explains approximately <b style='color:#38bdf8;'>93%</b> of the
         variance in used-car prices on the Polish market. Most predictions fall within
         &plusmn;19% of the actual transaction price, with an average absolute error of
-        around <b style='color:#38bdf8;'>11 900 PLN</b>. Performance is strongest for
+        around <b style='color:#38bdf8;'>12 500 PLN</b>. Performance is strongest for
         mass-market vehicles (2010-2024, economy-premium segment) and intentionally
         lower for vintage or exotic cars with very few comparable listings.
     </div>
@@ -761,7 +824,7 @@ def home_page() -> None:
             automotive market. The model was trained on data collected directly from
             <b style='color: #e2e8f0;'>Otomoto</b> - Poland's largest car-listing
             platform - and achieves an accuracy of approximately
-            <b style='color: #38bdf8;'>R&sup2; = 93.0%</b>.
+            <b style='color: #38bdf8;'>R&sup2; = 92.7%</b>.
         </p>
         <p>
             The project covers the <b style='color: #e2e8f0;'>complete data science
@@ -777,7 +840,7 @@ def home_page() -> None:
             <b style='color: #e2e8f0;'>Ridge Regression</b> (R&sup2; 72.4%) served as
             a linear baseline; <b style='color: #e2e8f0;'>Random Forest</b> (R&sup2; 92.2%)
             demonstrated the power of ensemble methods;
-            <b style='color: #e2e8f0;'>XGBoost Base</b> (R&sup2; 93.0%) was selected as
+            <b style='color: #e2e8f0;'>XGBoost Base</b> (R&sup2; 92.7%) was selected as
             the production model for its best overall test-set performance; and
             <b style='color: #e2e8f0;'>XGBoost Weighted</b> (R&sup2; 92.0%) explored
             sample weighting to improve predictions on rare luxury segments.
@@ -796,7 +859,7 @@ def home_page() -> None:
             The dataset of <b style='color: #e2e8f0;'>200 000+ listings</b> was
             collected using a custom stratified scraper that ensures balanced
             representation across popular brands, luxury marques, and electric vehicles.
-            All prices reflect the {CURRENT_YEAR - 2}-{CURRENT_YEAR} Polish market
+            All prices reflect the {_current_year() - 2}-{_current_year()} Polish market
             to avoid mixing incompatible price regimes from different economic periods.
         </p>
     </div>
@@ -899,7 +962,7 @@ def predict_page() -> None:
             vehicle_model = st.text_input("Model", placeholder="e.g. Golf, Astra, Corolla...")
             condition     = st.selectbox("Condition *", ["-- select --", "Used", "New"])
         with col2:
-            production_year = st.slider("Production Year *", 1915, CURRENT_YEAR, 2015)
+            production_year = st.slider("Production Year *", 1915, _current_year(), 2015)
             colour          = st.selectbox("Colour", ["-- select --"] + color_list)
             origin_country  = st.selectbox("Country of Origin", ["-- select --"] + country_list)
 
@@ -974,9 +1037,12 @@ def predict_page() -> None:
                         "Features":         features_input or "",
                     }
 
-                    final_df = prepare_input_data(user_inputs)
-                    y_log  = pipeline.predict(final_df)[0]
-                    price  = float(np.expm1(y_log))
+                    if _HAS_FEATURE_ENGINEER:
+                        final_df = prepare_raw_input(user_inputs)
+                    else:
+                        final_df = prepare_legacy_input(user_inputs, _ARTIFACT_BRAND_FREQ)
+                    y_log = pipeline.predict(final_df)[0]
+                    price = float(np.expm1(y_log))
 
                     price_low  = price * 0.85
                     price_high = price * 1.15
@@ -994,7 +1060,7 @@ def predict_page() -> None:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    vehicle_age      = CURRENT_YEAR - production_year
+                    vehicle_age      = _current_year() - production_year
                     mileage_per_year = mileage_km / max(vehicle_age, 1)
                     hp_per_liter     = power_HP / max(displacement_cm3 / 1000, 0.1)
                     brand_tier       = get_brand_tier(brand_choice)
@@ -1044,36 +1110,49 @@ def regional_page() -> None:
     st.markdown("""
     <h1 style='margin-bottom: 6px;'>Regional Market</h1>
     <p style='color: #64748b; margin-bottom: 20px; font-size: 15px;'>
-        Geographic distribution of car listings across Poland (200 000+ entries).
+        Geographic distribution of car listings across Poland.
     </p>
     """, unsafe_allow_html=True)
 
     if st.button("Back to Home"):
         navigate_to("home")
 
-    st.markdown("""
-    <div class='info-box'>
-        <p>Illustrative data - geographic distribution of listings from Polish
-        automotive platforms. Circle size and colour reflect the number of listings
-        in each city.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    city_sales, city_coords, is_real = load_regional_data()
+    total = sum(city_sales.values())
 
-    city_sales, city_coords = load_sample_data()
+    if is_real:
+        st.markdown(f"""
+        <div class='info-box'>
+            <p>Based on <b style='color:#e2e8f0;'>{total:,}</b> listings from the
+            scraped training dataset (<code>Car_sale_ads_balanced.csv</code>).
+            Circle size and colour reflect the number of listings in each city.
+            Only cities with known coordinates in our registry are shown.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class='warning-box'>
+            <p><b>DEMO DATA.</b> The training CSV was not bundled with this
+            deployment, so the map below shows synthetic per-city counts for
+            layout purposes only — they are <i>not</i> real Otomoto listings.
+            To see real numbers, run the pipeline locally with access to
+            <code>data/Car_sale_ads_balanced.csv</code>.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     poland_map = folium.Map(
         location=[52.0, 19.0], zoom_start=6, tiles="CartoDB dark_matter"
     )
-    max_sales = max(city_sales.values())
+    max_sales = max(city_sales.values()) if city_sales else 1
 
     for city, sales in city_sales.items():
         if city in city_coords:
             lat, lon = city_coords[city]
             radius = 10 + (sales / max_sales) * 32
             color = (
-                "#ef4444" if sales > 3000
-                else "#f97316" if sales > 2000
-                else "#eab308" if sales > 1000
+                "#ef4444" if sales > 0.6 * max_sales
+                else "#f97316" if sales > 0.4 * max_sales
+                else "#eab308" if sales > 0.2 * max_sales
                 else "#22c55e"
             )
             folium.CircleMarker(
@@ -1379,8 +1458,8 @@ def visualizations_page() -> None:
             "that even a simple model can capture the dominant linear trends "
             "(depreciation, power). Random Forest (R&sup2; 92.2%) shows a dramatic jump, "
             "proving that non-linear feature interactions are essential for accurate "
-            "pricing. XGBoost Base (R&sup2; 93.0%) was selected as the production model "
-            "because it achieves the best test-set MAPE (18.6%) while maintaining "
+            "pricing. XGBoost Base (R&sup2; 92.7%) was selected as the production model "
+            "because it achieves the best test-set MAPE (19.4%) while maintaining "
             "stable generalisation. XGBoost Weighted (R&sup2; 92.0%) trades ~1% overall "
             "accuracy for improved performance on rare luxury segments - a reasonable "
             "trade-off for some business use cases, but the base model was preferred "
@@ -1563,8 +1642,9 @@ that is inverse-transformed to the original PLN scale.
 | Model | R^2 | MAPE | Status |
 |-------|-----|------|--------|
 | Ridge Regression | 0.724 | 28.5% | Baseline |
-| Random Forest | 0.922 | 22.8% | Good |
-| **XGBoost (base)** | **0.930** | **18.6%** | Selected |
+| Random Forest | 0.922 | 23.0% | Good |
+| **XGBoost (base)** | **0.927** | **19.4%** | Selected |
+| XGBoost Weighted | 0.920 | 19.5% | Alternative |
 
 **Key advantages:**
 - Sequential boosting - each tree corrects the previous one's errors
@@ -1609,10 +1689,11 @@ Transmission, Body type, Doors, Colour, Location, Condition, Country of origin
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
-| **R^2** | 93.0% | Explains ~93% of price variance |
-| **RMSE** | 35 170 PLN | Root mean squared error |
-| **MAE** | 11 900 PLN | Mean absolute error |
-| **MAPE** | 18.6% | ~19% average relative deviation |
+| **R^2** | 92.7% | Explains ~93% of price variance |
+| **RMSE** | 35 899 PLN | Root mean squared error |
+| **MAE** | 12 462 PLN | Mean absolute error |
+| **MAPE** | 19.4% | ~19% average relative deviation |
+| **MdAPE** | reported in `reports/model_evaluation_report.txt` | Median absolute percentage error - outlier-robust |
 
 ---
 

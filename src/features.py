@@ -1,440 +1,371 @@
-# src/features.py
+"""src/features.py — Feature engineering.
 
-import pandas as pd
-import numpy as np
+Two APIs are exposed:
+
+1. **Legacy functions** ``engineer_base_features`` and
+   ``apply_advanced_transformations`` — kept for backward compatibility
+   with the existing main.py pipeline and the notebook.
+
+2. **``FeatureEngineeringTransformer``** — a scikit-learn–compatible
+   transformer that encapsulates *both* steps above.  It is picklable
+   and fits brand-frequency maps on the training data, eliminating the
+   inference-time feature mismatch that existed between the Streamlit
+   app and the trained model.
+
+All brand/tier constants come from :mod:`src.config` — this file never
+redefines them.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
 from typing import Tuple
-from sklearn.model_selection import train_test_split
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import (
-    OrdinalEncoder, 
-    OneHotEncoder, 
-    StandardScaler, 
-    PowerTransformer, 
-    PolynomialFeatures
-)
-from sklearn.compose import ColumnTransformer, make_column_selector
-from sklearn.pipeline import Pipeline
+
+import numpy as np
+import pandas as pd
 from category_encoders import TargetEncoder
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import (
+    OneHotEncoder,
+    OrdinalEncoder,
+    PolynomialFeatures,
+    PowerTransformer,
+    StandardScaler,
+)
 
-PREMIUM_BRANDS = [
-    'alfa romeo', 'alpine', 'aston martin', 'audi', 'bentley', 'bmw',
-    'cadillac', 'cupra', 'ds automobiles', 'ferrari', 'genesis',
-    'infiniti', 'jaguar', 'lamborghini', 'land rover', 'lexus',
-    'lincoln', 'lotus', 'maserati', 'maybach', 'mclaren',
-    'mercedes-benz', 'mini', 'porsche', 'rolls-royce', 'tesla', 'volvo'
-]
+from .config import (
+    BRAND_FREQUENCY_FALLBACK,
+    IS_PREMIUM_BRANDS,
+    get_age_category,
+    get_brand_popularity,
+    get_brand_tier,
+    get_performance_category,
+    get_usage_category,
+)
 
-def get_age_category(age: float) -> str:
-    """Categorize vehicle by age."""
-    if age < 3:
-        return 'New'
-    elif age < 9:
-        return 'Recent'
-    elif age < 17:
-        return 'Used'
-    else:
-        return 'Old'
+# ---------------------------------------------------------------------------
+# Stateless feature creation (pure function of a single row).
+# ---------------------------------------------------------------------------
 
-
-def get_usage_category(mileage_per_year: float) -> str:
-    """Categorize vehicle by usage intensity."""
-    if pd.isna(mileage_per_year):
-        return 'Unknown'
-    elif mileage_per_year < 10000:
-        return 'Low'
-    elif mileage_per_year < 20000:
-        return 'Average'
-    elif mileage_per_year < 30000:
-        return 'High'
-    else:
-        return 'Very_High'
-
-
-def get_performance_category(hp_per_liter: float) -> str:
-    """Categorize engine by performance tier."""
-    if pd.isna(hp_per_liter):
-        return 'Unknown'
-    elif hp_per_liter < 60:
-        return 'Economy'
-    elif hp_per_liter < 100:
-        return 'Standard'
-    elif hp_per_liter < 150:
-        return 'Performance'
-    else:
-        return 'High_Performance'
 
 def engineer_base_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Create base features that don't require fitting on training data.
-    
-    Creates:
-    - Age features (category, flags)
-    - Usage features (mileage per year, intensity)
-    - Performance features (HP per liter, category)
-    - Market segment features (premium, supercar, collector)
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame with vehicle data
-        
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with engineered features
+    """Create row-wise features that do not require fitting.
+
+    Covers age / usage / performance / premium / collector / num_features /
+    listing_year — everything that depends only on the current row.
     """
     df = df.copy()
 
-    if 'Vehicle_age' not in df.columns and 'Production_year' in df.columns:
-        from datetime import datetime
-        df['Vehicle_age'] = datetime.now().year - df['Production_year']
-    
-    if 'Vehicle_age' in df.columns:
-        df['Age_category'] = df['Vehicle_age'].apply(get_age_category)
-        df['Is_new_car'] = (df['Vehicle_age'] < 3).astype('Int64')
-        df['Is_old_car'] = (df['Vehicle_age'] > 16).astype('Int64')
-    
-    if 'Mileage_km' in df.columns and 'Vehicle_age' in df.columns:
-        df['Mileage_per_year'] = df['Mileage_km'] / df['Vehicle_age'].replace(0, 1)
-        df['Usage_intensity'] = df['Mileage_per_year'].apply(get_usage_category)
-    
-    if 'Power_HP' in df.columns and 'Displacement_cm3' in df.columns:
-        displacement_safe = df['Displacement_cm3'].replace(0, 100)  # 100cc minimum
-        df['HP_per_liter'] = df['Power_HP'] / (displacement_safe / 1000)
-        df['HP_per_liter'] = df['HP_per_liter'].replace([np.inf, -np.inf], np.nan)
-        df['Performance_category'] = df['HP_per_liter'].apply(get_performance_category)
-    
-    if 'Vehicle_brand' in df.columns:
-        df['Is_premium'] = (
-            df['Vehicle_brand'].str.lower().isin(PREMIUM_BRANDS).astype('Int64')
-        )
-    
-    if 'Power_HP' in df.columns and 'Is_premium' in df.columns:
-        df['Is_supercar'] = (
-            (df['Power_HP'] > 500) & (df['Is_premium'] == 1)
-        ).astype('Int64')
-    
-    if 'Vehicle_age' in df.columns:
-        df['Is_collector'] = (df['Vehicle_age'] > 25).astype('Int64')
+    if "Vehicle_age" not in df.columns and "Production_year" in df.columns:
+        df["Vehicle_age"] = datetime.now().year - df["Production_year"]
 
-    if 'Features' in df.columns:
-        df['Num_features'] = (
-            df['Features']
-            .fillna('')
-            .apply(lambda x: len([f for f in str(x).split(',') if f.strip()]))
+    if "Vehicle_age" in df.columns:
+        df["Age_category"] = df["Vehicle_age"].apply(get_age_category)
+        df["Is_new_car"] = (df["Vehicle_age"] < 3).astype("Int64")
+        df["Is_old_car"] = (df["Vehicle_age"] > 16).astype("Int64")
+        df["Is_collector"] = (df["Vehicle_age"] > 25).astype("Int64")
+
+    if "Mileage_km" in df.columns and "Vehicle_age" in df.columns:
+        df["Mileage_per_year"] = df["Mileage_km"] / df["Vehicle_age"].replace(0, 1)
+        df["Usage_intensity"] = df["Mileage_per_year"].apply(get_usage_category)
+
+    if "Power_HP" in df.columns and "Displacement_cm3" in df.columns:
+        displacement_safe = df["Displacement_cm3"].replace(0, 100)
+        df["HP_per_liter"] = df["Power_HP"] / (displacement_safe / 1000)
+        df["HP_per_liter"] = df["HP_per_liter"].replace([np.inf, -np.inf], np.nan)
+        df["Performance_category"] = df["HP_per_liter"].apply(get_performance_category)
+
+    if "Vehicle_brand" in df.columns:
+        df["Is_premium"] = (
+            df["Vehicle_brand"].astype(str).str.lower().str.strip()
+            .isin(IS_PREMIUM_BRANDS).astype("Int64")
         )
 
-    # Extract listing year before dropping Offer_publication_date so the model
-    # can distinguish 2019 prices from 2024 prices for the same car specs.
-    if 'Offer_publication_date' in df.columns:
-        from datetime import datetime
-        df['Listing_year'] = (
-            pd.to_datetime(df['Offer_publication_date'], errors='coerce')
-            .dt.year
-            .fillna(datetime.now().year)
-            .astype(int)
+    if "Power_HP" in df.columns and "Is_premium" in df.columns:
+        df["Is_supercar"] = (
+            (df["Power_HP"] > 500) & (df["Is_premium"] == 1)
+        ).astype("Int64")
+
+    if "Features" in df.columns:
+        df["Num_features"] = (
+            df["Features"].fillna("").apply(
+                lambda x: len([f for f in str(x).split(",") if f.strip()])
+            )
+        )
+
+    if "Offer_publication_date" in df.columns:
+        df["Listing_year"] = (
+            pd.to_datetime(df["Offer_publication_date"], errors="coerce")
+            .dt.year.fillna(datetime.now().year).astype(int)
         )
 
     cols_to_drop = [
-        'Vehicle_generation',
-        'Production_year',
-        'Index',
-        'Offer_publication_date',
+        "Vehicle_generation", "Production_year", "Index", "Offer_publication_date",
     ]
-    df = df.drop(columns=cols_to_drop, errors='ignore')
-    
+    df = df.drop(columns=cols_to_drop, errors="ignore")
     return df
 
 
-def _get_brand_tier(brand: str) -> str:
-    """Classify a brand into one of five market tiers."""
-    b = str(brand).strip().lower()
-
-    _ultra_luxury = {
-        'ferrari', 'lamborghini', 'rolls-royce', 'bentley', 'mclaren',
-        'bugatti', 'koenigsegg', 'pagani', 'aston martin', 'maybach',
-    }
-    _luxury = {
-        'mercedes-benz', 'bmw', 'audi', 'porsche', 'lexus', 'jaguar',
-        'maserati', 'tesla', 'land rover', 'infiniti', 'lincoln',
-        'genesis', 'cadillac', 'volvo',
-    }
-    _premium = {
-        'alfa romeo', 'mini', 'saab', 'ds automobiles', 'cupra',
-        'alpine', 'lotus', 'subaru', 'acura', 'baic', 'ssangyong',
-    }
-    _mass_market = {
-        'volkswagen', 'toyota', 'ford', 'hyundai', 'kia', 'honda',
-        'opel', 'chevrolet', 'peugeot', 'renault', 'seat', 'skoda',
-        'fiat', 'nissan', 'mazda', 'mitsubishi', 'suzuki', 'dacia',
-        'citroen', 'citroën', 'dodge', 'ram', 'jeep', 'chrysler',
-        'lancia', 'daewoo', 'lada',
-    }
-
-    if b in _ultra_luxury:
-        return 'Ultra_Luxury'
-    if b in _luxury:
-        return 'Luxury'
-    if b in _premium:
-        return 'Premium'
-    if b in _mass_market:
-        return 'Mass_Market'
-    return 'Niche'
+# ---------------------------------------------------------------------------
+# Legacy function — kept for notebook / existing main.py pipeline.
+# New code should use ``FeatureEngineeringTransformer`` instead.
+# ---------------------------------------------------------------------------
 
 
 def apply_advanced_transformations(
-    X_train: pd.DataFrame, 
-    X_test: pd.DataFrame
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Fit-on-train, apply-to-both advanced transformations.
+
+    **Deprecated for new pipelines** — use
+    :class:`FeatureEngineeringTransformer` which bundles the same logic
+    into a picklable sklearn transformer.  Kept here so existing notebook
+    / main.py code keeps working.
     """
-    Apply transformations that require fitting on training data.
-    
-    Includes:
-    - Missing value imputation
-    - Log transformations
-    - Polynomial features
-    - Interaction terms
-    - Brand-level market features (tier, frequency, rarity, popularity)
-    
+    transformer = FeatureEngineeringTransformer(run_base_features=False)
+    X_train_tf = transformer.fit_transform(X_train)
+    X_test_tf = transformer.transform(X_test)
+    return X_train_tf, X_test_tf
+
+
+# ---------------------------------------------------------------------------
+# sklearn-compatible transformer — picklable, self-contained.
+# ---------------------------------------------------------------------------
+
+
+class FeatureEngineeringTransformer(BaseEstimator, TransformerMixin):
+    """End-to-end feature engineering as a single sklearn transformer.
+
+    On ``fit``:
+        * computes ``brand_freq_`` and ``brand_model_freq_`` maps from the
+          training data,
+        * stores medians / modes of numeric and categorical columns for
+          imputation at transform time.
+
+    On ``transform``:
+        * applies stateless feature creation (age / usage / performance / …)
+          via :func:`engineer_base_features`,
+        * imputes numeric / categorical columns using the fitted statistics,
+        * creates log, squared, and interaction features,
+        * creates brand-level features (``Brand_frequency``,
+          ``Brand_tier``, ``Rarity_index``, ``BrandModel_frequency``,
+          ``Brand_popularity``) using the fitted maps.
+
+    Because all state is stored as ``self._x`` attributes, the transformer
+    is fully picklable — no external constants are required at inference.
+
     Parameters
     ----------
-    X_train : pd.DataFrame
-        Training features
-    X_test : pd.DataFrame
-        Test features
-        
-    Returns
-    -------
-    tuple
-        (X_train_transformed, X_test_transformed)
+    run_base_features : bool, default True
+        If True, run :func:`engineer_base_features` as the first step.
+        Set to False when the caller has already called that function
+        (used by the legacy :func:`apply_advanced_transformations` wrapper).
     """
-    X_train, X_test = X_train.copy(), X_test.copy()
-    
-    # ========================================================================
-    # IMPUTE MISSING VALUES
-    # ========================================================================
-    
-    numeric_cols_to_fill = ['Mileage_km', 'Power_HP', 'Displacement_cm3', 'Doors_number']
 
-    for col in numeric_cols_to_fill:
-        if col in X_train.columns:
-            if col == 'Doors_number':
-                mode_result = X_train[col].mode()
-                fill_value = mode_result.iloc[0] if not mode_result.empty else 4
+    _NUMERIC_IMPUTE_COLS = (
+        "Mileage_km", "Power_HP", "Displacement_cm3", "Doors_number", "Vehicle_age",
+    )
+    _CATEGORICAL_IMPUTE_COLS = ("Drive", "Type", "Transmission")
+    _LOG_COLS = ("Mileage_km", "Power_HP", "Displacement_cm3")
+
+    def __init__(self, run_base_features: bool = True):
+        self.run_base_features = run_base_features
+
+    # -- sklearn API --------------------------------------------------------
+
+    def fit(self, X: pd.DataFrame, y=None):
+        X = X.copy()
+        if self.run_base_features:
+            X = engineer_base_features(X)
+
+        self.numeric_fill_: dict[str, float] = {}
+        for col in self._NUMERIC_IMPUTE_COLS:
+            if col in X.columns:
+                if col == "Doors_number":
+                    mode_result = X[col].mode()
+                    fill = float(mode_result.iloc[0]) if not mode_result.empty else 4.0
+                else:
+                    fill = X[col].median()
+                if pd.isna(fill):
+                    fill = 0.0
+                self.numeric_fill_[col] = float(fill)
+
+        self.categorical_fill_: dict[str, str] = {}
+        for col in self._CATEGORICAL_IMPUTE_COLS:
+            if col in X.columns:
+                mode_result = X[col].mode()
+                self.categorical_fill_[col] = (
+                    str(mode_result.iloc[0]) if not mode_result.empty else "Unknown"
+                )
+
+        if "Vehicle_brand" in X.columns:
+            brand_col = X["Vehicle_brand"].astype(str).str.lower().str.strip()
+            self.brand_freq_: dict[str, int] = brand_col.value_counts().to_dict()
+            self.max_brand_freq_: int = max(self.brand_freq_.values()) if self.brand_freq_ else 1
+
+            if "Vehicle_model" in X.columns:
+                model_col = (
+                    brand_col + "_"
+                    + X["Vehicle_model"].astype(str).str.lower().str.strip()
+                )
+                self.brand_model_freq_: dict[str, int] = model_col.value_counts().to_dict()
             else:
-                fill_value = X_train[col].median()
-            # If median is NaN (all values missing), fall back to a safe default
-            if pd.isna(fill_value):
-                fill_value = 0
+                self.brand_model_freq_ = {}
+        else:
+            self.brand_freq_ = {}
+            self.max_brand_freq_ = 1
+            self.brand_model_freq_ = {}
 
-            X_train[col] = X_train[col].fillna(fill_value)
-            X_test[col] = X_test[col].fillna(fill_value)
-        
-    if 'Vehicle_age' in X_train.columns:
-        age_median = X_train['Vehicle_age'].median()
-        X_train['Vehicle_age'] = X_train['Vehicle_age'].fillna(age_median)
-        X_test['Vehicle_age'] = X_test['Vehicle_age'].fillna(age_median)
+        self.feature_names_out_: list[str] | None = None
+        return self
 
-    for df in [X_train, X_test]:
-        if 'Power_HP' in df.columns and 'Displacement_cm3' in df.columns:
-            displacement_safe = df['Displacement_cm3'].replace(0, 100)
-            df['HP_per_liter'] = df['Power_HP'] / (displacement_safe / 1000)
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        X = X.copy()
+        if self.run_base_features:
+            X = engineer_base_features(X)
 
-        if 'Mileage_km' in df.columns and 'Vehicle_age' in df.columns:
-            df['Mileage_per_year'] = df['Mileage_km'] / df['Vehicle_age'].replace(0, 1)
+        # -- Impute numeric cols --------------------------------------------
+        for col, fill in self.numeric_fill_.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(fill)
 
-        if 'Is_premium' in df.columns and 'Power_HP' in df.columns:
-            df['Is_supercar'] = ((df['Power_HP'] > 500) & (df['Is_premium'] == 1)).astype('Int64')
-    
-    # ========================================================================
-    # LOG TRANSFORMATIONS (protect against zeros and negatives)
-    # ========================================================================
-    for df in [X_train, X_test]:
-        if 'Mileage_km' in df.columns:
-            df['Mileage_km_log'] = np.log1p(df['Mileage_km'].clip(lower=0))
-        
-        if 'Power_HP' in df.columns:
-            df['Power_HP_log'] = np.log1p(df['Power_HP'].clip(lower=0))
-        
-        if 'Displacement_cm3' in df.columns:
-            df['Displacement_cm3_log'] = np.log1p(df['Displacement_cm3'].clip(lower=0))
-    
-    if 'Drive' in X_train.columns:
-        mode_result = X_train['Drive'].mode()
-        train_mode = mode_result.iloc[0] if not mode_result.empty else 'Unknown'
+        # -- Recompute features that depend on imputed values ---------------
+        if "Power_HP" in X.columns and "Displacement_cm3" in X.columns:
+            displacement_safe = X["Displacement_cm3"].replace(0, 100)
+            X["HP_per_liter"] = X["Power_HP"] / (displacement_safe / 1000)
+            X["HP_per_liter"] = X["HP_per_liter"].replace([np.inf, -np.inf], np.nan)
 
-        X_train['Drive'] = X_train['Drive'].fillna(train_mode)
-        X_test['Drive'] = X_test['Drive'].fillna(train_mode)
+        if "Mileage_km" in X.columns and "Vehicle_age" in X.columns:
+            X["Mileage_per_year"] = X["Mileage_km"] / X["Vehicle_age"].replace(0, 1)
 
-    if 'Type' in X_train.columns:
-        mode_result = X_train['Type'].mode()
-        if not mode_result.empty:
-            train_mode = mode_result.iloc[0]
-            X_train['Type'] = X_train['Type'].fillna(train_mode)
-            X_test['Type'] = X_test['Type'].fillna(train_mode)
+        if "Is_premium" in X.columns and "Power_HP" in X.columns:
+            X["Is_supercar"] = (
+                (X["Power_HP"] > 500) & (X["Is_premium"] == 1)
+            ).astype("Int64")
 
-    if 'Transmission' in X_train.columns:
-        mode_result = X_train['Transmission'].mode()
-        train_mode = mode_result.iloc[0] if not mode_result.empty else 'Unknown'
+        # -- Log transforms -------------------------------------------------
+        for col in self._LOG_COLS:
+            if col in X.columns:
+                X[f"{col}_log"] = np.log1p(X[col].clip(lower=0))
 
-        X_train['Transmission'] = X_train['Transmission'].fillna(train_mode)
-        X_test['Transmission'] = X_test['Transmission'].fillna(train_mode)
+        # -- Impute categorical cols ----------------------------------------
+        for col, fill in self.categorical_fill_.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(fill)
 
-    # ========================================================================
-    # POLYNOMIAL FEATURES (protect against NaN)
-    # ========================================================================
-    for df in [X_train, X_test]:
-        if 'Vehicle_age' in df.columns:
-            age_safe = df['Vehicle_age'].fillna(0)
-            df['Vehicle_age_squared'] = age_safe ** 2
-        
-        if 'Power_HP' in df.columns:
-            power_safe = df['Power_HP'].fillna(0)
-            df['Power_HP_squared'] = power_safe ** 2
-        
-        if 'Mileage_km' in df.columns:
-            mileage_safe = df['Mileage_km'].fillna(0)
-            df['Mileage_km_squared'] = mileage_safe ** 2
-    
-    # ========================================================================
-    # INTERACTION TERMS (protect against NaN)
-    # ========================================================================
-    for df in [X_train, X_test]:
-        if 'Vehicle_age' in df.columns and 'Mileage_km' in df.columns:
-            age_safe = df['Vehicle_age'].fillna(0)
-            mileage_safe = df['Mileage_km'].fillna(0)
-            df['Age_Mileage_interaction'] = age_safe * mileage_safe
-        
-        if 'Power_HP' in df.columns and 'Vehicle_age' in df.columns:
-            power_safe = df['Power_HP'].fillna(0)
-            age_safe = df['Vehicle_age'].fillna(0)
-            df['Power_Age_interaction'] = power_safe * age_safe
-        
-        if 'Mileage_per_year' in df.columns and 'Vehicle_age' in df.columns:
-            mpy_safe = df['Mileage_per_year'].fillna(0)
-            age_safe = df['Vehicle_age'].fillna(0)
-            df['Mileage_per_year_Age'] = mpy_safe * age_safe
+        # -- Polynomial features --------------------------------------------
+        for col, new_name in (
+            ("Vehicle_age", "Vehicle_age_squared"),
+            ("Power_HP", "Power_HP_squared"),
+            ("Mileage_km", "Mileage_km_squared"),
+        ):
+            if col in X.columns:
+                X[new_name] = X[col].fillna(0) ** 2
 
-    # ========================================================================
-    # BRAND-LEVEL MARKET FEATURES
-    # ========================================================================
-    if 'Vehicle_brand' in X_train.columns:
-        brand_col = X_train['Vehicle_brand'].str.lower().str.strip()
-        brand_freq = brand_col.value_counts().to_dict()
+        # -- Interaction terms ----------------------------------------------
+        if "Vehicle_age" in X.columns and "Mileage_km" in X.columns:
+            X["Age_Mileage_interaction"] = (
+                X["Vehicle_age"].fillna(0) * X["Mileage_km"].fillna(0)
+            )
+        if "Power_HP" in X.columns and "Vehicle_age" in X.columns:
+            X["Power_Age_interaction"] = (
+                X["Power_HP"].fillna(0) * X["Vehicle_age"].fillna(0)
+            )
+        if "Mileage_per_year" in X.columns and "Vehicle_age" in X.columns:
+            X["Mileage_per_year_Age"] = (
+                X["Mileage_per_year"].fillna(0) * X["Vehicle_age"].fillna(0)
+            )
 
-        for df, is_train in [(X_train, True), (X_test, False)]:
-            brand_lower = df['Vehicle_brand'].str.lower().str.strip()
-            df['Brand_tier'] = brand_lower.apply(_get_brand_tier)
-            df['Brand_frequency'] = brand_lower.map(brand_freq).fillna(1).astype(int)
+        # -- Brand-level market features ------------------------------------
+        if "Vehicle_brand" in X.columns:
+            brand_lower = X["Vehicle_brand"].astype(str).str.lower().str.strip()
+            X["Brand_tier"] = brand_lower.apply(get_brand_tier)
+            X["Brand_frequency"] = (
+                brand_lower.map(self.brand_freq_).fillna(1).astype(int)
+            )
 
-            max_freq = max(brand_freq.values()) if brand_freq else 1
-            raw_rarity = np.log1p(max_freq / df['Brand_frequency'].clip(lower=1))
-            max_rarity = np.log1p(max_freq)
-            df['Rarity_index'] = (raw_rarity / max_rarity).clip(upper=1.0).round(4)
+            raw_rarity = np.log1p(self.max_brand_freq_ / X["Brand_frequency"].clip(lower=1))
+            max_rarity = np.log1p(self.max_brand_freq_)
+            X["Rarity_index"] = (raw_rarity / max_rarity).clip(upper=1.0).round(4)
 
-            model_col = (brand_lower + '_' + df['Vehicle_model'].astype(str).str.lower().str.strip())
-            if is_train:
-                bm_freq_map = model_col.value_counts().to_dict()
-            df['BrandModel_frequency'] = model_col.map(bm_freq_map).fillna(1).astype(int)
+            if "Vehicle_model" in X.columns:
+                model_col = (
+                    brand_lower + "_"
+                    + X["Vehicle_model"].astype(str).str.lower().str.strip()
+                )
+                X["BrandModel_frequency"] = (
+                    model_col.map(self.brand_model_freq_).fillna(1).astype(int)
+                )
+            else:
+                X["BrandModel_frequency"] = 1
 
-            df['Brand_popularity'] = pd.cut(
-                df['Brand_frequency'],
-                bins=[0, 5, 20, 100, 500, np.inf],
-                labels=['Ultra_Rare', 'Rare', 'Uncommon', 'Common', 'Popular'],
-                right=True,
-            ).astype(str)
+            X["Brand_popularity"] = X["Brand_frequency"].apply(get_brand_popularity)
 
-    return X_train, X_test
+        if self.feature_names_out_ is None:
+            self.feature_names_out_ = list(X.columns)
+
+        return X
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array(self.feature_names_out_ or [])
+
+
+# ---------------------------------------------------------------------------
+# Preprocessors (column-transformers) used by different models.
+# ---------------------------------------------------------------------------
+
 
 def get_preprocessor_tree() -> ColumnTransformer:
-    """
-    Get preprocessor for tree-based models.
-    
-    Returns
-    -------
-    ColumnTransformer
-        Preprocessor with median imputation and ordinal encoding
-    """
-    num_pipeline_tree = SimpleImputer(strategy='median')
-
-    cat_pipeline_tree = Pipeline([
-        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-        ('encoder', OrdinalEncoder(
-            handle_unknown='use_encoded_value', 
-            unknown_value=-1
-        ))
+    """Preprocessor for tree-based models: median impute + ordinal encode."""
+    num_pipeline = SimpleImputer(strategy="median")
+    cat_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+        ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
     ])
 
-    preprocessor_tree = ColumnTransformer([
-        ('num', num_pipeline_tree, make_column_selector(dtype_include='number')),
-        ('cat', cat_pipeline_tree, make_column_selector(dtype_include=['object', 'category']))
+    return ColumnTransformer([
+        ("num", num_pipeline, make_column_selector(dtype_include="number")),
+        ("cat", cat_pipeline, make_column_selector(dtype_include=["object", "category"])),
     ])
-
-    return preprocessor_tree
 
 
 def get_preprocessor_mastered(smoothing: int = 200) -> ColumnTransformer:
-    """
-    Get advanced preprocessor for linear models.
-    
-    Parameters
-    ----------
-    smoothing : int, default=200
-        TargetEncoder smoothing parameter
-        
-    Returns
-    -------
-    ColumnTransformer
-        Preprocessor with transformations and encodings
-    """
-    num_cols = ['Mileage_km', 'Power_HP', 'Displacement_cm3', 'Vehicle_age']
-    cat_cols_to_encode = ['Vehicle_brand', 'Vehicle_model']
-    cat_cols_simple = ['Fuel_type', 'Transmission', 'Drive', 'Type']
+    """Preprocessor for linear models: yeo-johnson + poly + target encoding."""
+    num_cols = ["Mileage_km", "Power_HP", "Displacement_cm3", "Vehicle_age"]
+    cat_cols_to_encode = ["Vehicle_brand", "Vehicle_model"]
+    cat_cols_simple = ["Fuel_type", "Transmission", "Drive", "Type"]
 
     num_transformer = Pipeline([
-        ('imputer', SimpleImputer(strategy='median')),
-        ('yeo', PowerTransformer(method='yeo-johnson')),
-        ('poly', PolynomialFeatures(degree=2, interaction_only=True))
+        ("imputer", SimpleImputer(strategy="median")),
+        ("yeo", PowerTransformer(method="yeo-johnson")),
+        ("poly", PolynomialFeatures(degree=2, interaction_only=True)),
     ])
 
-    preprocessor_mastered = ColumnTransformer([
-        ('num', num_transformer, num_cols),
-        ('target', TargetEncoder(smoothing=smoothing), cat_cols_to_encode),
-        ('cat_simple', OneHotEncoder(handle_unknown='ignore'), cat_cols_simple)
+    return ColumnTransformer([
+        ("num", num_transformer, num_cols),
+        ("target", TargetEncoder(smoothing=smoothing), cat_cols_to_encode),
+        ("cat_simple", OneHotEncoder(handle_unknown="ignore"), cat_cols_simple),
     ])
-
-    return preprocessor_mastered
 
 
 def get_preprocessor_v2(smoothing: int = 300) -> ColumnTransformer:
-    """
-    Get preprocessor for the tuned XGBoost model with brand-level features.
-    
-    Uses StandardScaler for numeric features (including brand frequency metrics),
-    TargetEncoder for high-cardinality categoricals, and OneHotEncoder for
-    low-cardinality categoricals including brand tier and popularity.
-    
-    Parameters
-    ----------
-    smoothing : int, default=300
-        TargetEncoder smoothing parameter
-        
-    Returns
-    -------
-    ColumnTransformer
-        Preprocessor matching the notebook's preprocessor_v2
-    """
+    """Preprocessor for the tuned XGBoost with brand-level numeric features."""
     num_cols_v2 = [
-        'Mileage_km', 'Power_HP', 'Displacement_cm3', 'Vehicle_age',
-        'Brand_frequency', 'Rarity_index', 'BrandModel_frequency',
+        "Mileage_km", "Power_HP", "Displacement_cm3", "Vehicle_age",
+        "Brand_frequency", "Rarity_index", "BrandModel_frequency",
     ]
-    cat_cols_encode = ['Vehicle_brand', 'Vehicle_model']
-    cat_cols_ohe = ['Fuel_type', 'Transmission', 'Drive', 'Type', 'Brand_tier', 'Brand_popularity']
+    cat_cols_encode = ["Vehicle_brand", "Vehicle_model"]
+    cat_cols_ohe = [
+        "Fuel_type", "Transmission", "Drive", "Type",
+        "Brand_tier", "Brand_popularity",
+    ]
 
-    preprocessor_v2 = ColumnTransformer([
-        ('num', StandardScaler(), num_cols_v2),
-        ('target', TargetEncoder(smoothing=smoothing), cat_cols_encode),
-        ('cat_simple', OneHotEncoder(handle_unknown='ignore'), cat_cols_ohe),
+    return ColumnTransformer([
+        ("num", StandardScaler(), num_cols_v2),
+        ("target", TargetEncoder(smoothing=smoothing), cat_cols_encode),
+        ("cat_simple", OneHotEncoder(handle_unknown="ignore"), cat_cols_ohe),
     ])
-
-    return preprocessor_v2
